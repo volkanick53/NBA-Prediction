@@ -270,13 +270,11 @@ def upload_to_bigquery(records):
 #     print("Pipeline completed successfully.")
 
 
-# scrape_and_load.py içindeki ilgili alt kısım:
 if __name__ == "__main__":
-    # Tüm liste yerine sadece eksiklerin olduğu JSON'ı okutuyoruz
     json_file = "missing_boxscore_urls.json" 
 
     if not os.path.exists(json_file):
-        print(f"[ERROR] '{json_file}' bulunamadı. Lütfen önce find_missing_urls.py çalıştırın.")
+        print(f"[ERROR] '{json_file}' not found. Please run find_missing_urls.py first.")
         exit(1)
 
     with open(json_file, "r") as f:

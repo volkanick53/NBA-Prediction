@@ -48,7 +48,7 @@ GROUP BY season, team_id
 
 df_teams = client.query(query).to_dataframe()
 
-# NBA Konferans Haritası
+# NBA Conference Map
 CONFERENCES = {
     "BOS": "East",
     "NYK": "East",
@@ -83,7 +83,7 @@ CONFERENCES = {
 }
 
 # ---------------------------------------------------------
-# 2. Takım Net Rating Projeksiyonu
+# 2. Team Net Rating Projection
 # ---------------------------------------------------------
 team_projections = []
 weights = {"2025-26": 0.55, "2024-25": 0.30, "2023-24": 0.15}
@@ -107,7 +107,7 @@ for t in all_teams:
         (weighted_net_rtg / total_w) if total_w > 0 else t_data["net_rating"].mean()
     )
 
-    # Ortalamaya hafif regresyon (%15 küçülme faktörü)
+    
     proj_net = proj_net * 0.85
 
     team_projections.append(
@@ -121,8 +121,7 @@ for t in all_teams:
 team_proj_df = pd.DataFrame(team_projections)
 
 # ---------------------------------------------------------
-# 3. Galibiyet Sayısı Hesabı (Pythagorean & Win Scaling)
-# NBA'de her +1.0 Net Rating ortalama ~2.7 galibiyete karşılık gelir (Baz: 41 Win)
+# 3. Win Projection (Pythagorean & Win Scaling)
 # ---------------------------------------------------------
 team_proj_df["raw_wins"] = 41.0 + (team_proj_df["proj_net_rating"] * 2.7)
 
@@ -137,7 +136,7 @@ team_proj_df["Record"] = (
 )
 
 # ---------------------------------------------------------
-# 4. Konferans Sıralamalarını Yazdır ve Kaydet
+# 4. Save Results and Preview
 # ---------------------------------------------------------
 team_proj_df.sort_values(by=["conference", "Proj_Wins"], ascending=[True, False], inplace=True)
 team_proj_df.to_csv("nba_2026_27_team_standings_projection.csv", index=False)

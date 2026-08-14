@@ -4,7 +4,7 @@ from google.cloud import bigquery
 from google.oauth2 import service_account
 
 # ---------------------------------------------------------
-# GCP BigQuery Bağlantısı
+# GCP BigQuery Connection
 # ---------------------------------------------------------
 KEY_PATH = "nba-analytics-503718-9f3bbd399bc1.json"
 PROJECT_ID = "nba-analytics-503718"
@@ -12,7 +12,7 @@ PROJECT_ID = "nba-analytics-503718"
 credentials = service_account.Credentials.from_service_account_file(KEY_PATH)
 client = bigquery.Client(credentials=credentials, project=PROJECT_ID)
 
-print("1. BigQuery'den oyuncuların sezonluk istatistikleri çekiliyor...")
+print("1. Fetching player boxscore data from BigQuery...")
 
 query = """
 WITH player_seasons AS (
@@ -43,7 +43,7 @@ SELECT * FROM player_seasons
 df = client.query(query).to_dataframe()
 
 # ---------------------------------------------------------
-# 2. 2025-26 Sezonunda En Çok Süre Alan Top 100 Oyuncuyu Belirle
+# 2. Top 100 player in 2025-26 season
 # ---------------------------------------------------------
 last_season_df = df[df["season"] == "2025-26"].copy()
 top_100_players = (
@@ -52,10 +52,10 @@ top_100_players = (
     .tolist()
 )
 
-print(f"-> Top 100 oyuncu belirlendi. (Toplam veri satırı: {len(df)})")
+print(f"-> Top 100 players identified. (Total data rows: {len(df)})")
 
 # ---------------------------------------------------------
-# 3. Ağırlıklı Projeksiyon Algoritması (2026-27 Sezonu İçin)
+# 3. Weighted Projection Algorithm (For the 2026-27 Season)
 # ---------------------------------------------------------
 weights = {"2025-26": 0.55, "2024-25": 0.30, "2023-24": 0.15}
 metrics = [
@@ -84,7 +84,7 @@ for pid in top_100_players:
         "team_id": p_team,
     }
 
-    # Sezon ağırlıklı ortalamaları hesapla
+    # Calculate season-weighted averages
     for m in metrics:
         weighted_sum = 0
         total_weight = 0
@@ -105,7 +105,7 @@ for pid in top_100_players:
 
 proj_df = pd.DataFrame(projections)
 
-# Kolon isimlerini temiz ve anlaşılır yapalım
+
 proj_df.rename(
     columns={
         "mpg": "Proj_MIN",
@@ -122,19 +122,17 @@ proj_df.rename(
     inplace=True,
 )
 
-# Skor beklentisine göre sırala
 proj_df.sort_values(by="Proj_PTS", ascending=False, inplace=True)
 proj_df.reset_index(drop=True, inplace=True)
-proj_df.index += 1  # 1'den 100'e sıralama
+proj_df.index += 1  # Order 1 to 100
 
 # ---------------------------------------------------------
-# 4. Sonuçları Kaydet ve Önizleme Göster
+# 4.Save Results and Preview
 # ---------------------------------------------------------
 output_file = "nba_2026_27_top100_projections.csv"
 proj_df.to_csv(output_file, index_label="Rank")
-print(f"\n[BAŞARILI] 2026-27 Top 100 Projeksiyonu '{output_file}' olarak kaydedildi!\n")
 
-print("=== 2026-27 EN YÜKSEK SAYI BEKLENTİSİ OLAN İLK 15 YILDIZ ===")
+print("=== Top 15 Stars Projected to Score the Most Points in 2026-27 ===")
 print(
     proj_df[
         [

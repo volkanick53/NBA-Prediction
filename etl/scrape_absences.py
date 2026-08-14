@@ -59,7 +59,7 @@ def extract_absences(url):
     absences = []
 
     # ---------------------------------------------------------
-    # 1. DNP / DND (Did Not Play / Did Not Dress) - Boxscore Tablolarindan
+    # 1. DNP / DND (Did Not Play / Did Not Dress) - From Boxscore Tables
     # ---------------------------------------------------------
     basic_tables = soup.find_all("table", id=re.compile(r"box-[A-Z]{3}-game-basic"))
     for table in basic_tables:
@@ -67,7 +67,6 @@ def extract_absences(url):
         rows = table.find("tbody").find_all("tr")
 
         for row in rows:
-            # Sadece 'reason' verisi olan (oynamayan) satirlari yakala
             reason_td = row.find("td", {"data-stat": "reason"})
             if not reason_td:
                 continue
@@ -97,17 +96,16 @@ def extract_absences(url):
             })
 
     # ---------------------------------------------------------
-    # 2. INACTIVE Oyuncular - Sayfanin En Altindaki Div/Tablodan
+    # 2. INACTIVE Players - From Inactives Section
     # ---------------------------------------------------------
-    # BBR'de 'Inactives' yazan h2 veya div'i buluyoruz
+    
     inactives_div = soup.find("div", id="all_inactives") or soup.find("div", id="inactives")
     
     if inactives_div:
-        # Metin icindeki takim ve oyuncu baglantilarini tara
-        # Genellikle: Team Code followed by player links
+       
         text_content = inactives_div.get_text()
         
-        # Inactive alanindaki tum oyuncu linklerini cek
+        # Check if the text contains "Inactive" or "Inactives"
         player_links = inactives_div.find_all("a")
         for link in player_links:
             href = link.get("href", "")
@@ -115,8 +113,7 @@ def extract_absences(url):
                 player_id = href.split("/")[-1].replace(".html", "")
                 player_name = link.text.strip()
                 
-                # Oyuncunun hangi takima ait oldugunu tespiti
-                # Parent span/div veya etrafindaki takim koduna bakilir
+               
                 parent_text = link.parent.text if link.parent else ""
                 team_id = None
                 for t in ["ATL", "BOS", "BRK", "CHO", "CHI", "CLE", "DAL", "DEN", "DET", "GSW",
@@ -156,11 +153,10 @@ def upload_to_bigquery(records):
 
 
 if __name__ == "__main__":
-    # Tüm liste yerine sadece kalan maçların olduğu JSON okunuyor
     json_file = "remaining_absences_urls.json"
 
     if not os.path.exists(json_file):
-        print(f"[ERROR] '{json_file}' bulunamadı.")
+        print(f"[ERROR] '{json_file}' not found.")
         exit(1)
 
     with open(json_file, "r") as f:
