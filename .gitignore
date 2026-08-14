@@ -1,0 +1,17 @@
+Set-Content -Path .gitignore -Value @"
+*.json
+!remaining_absences_urls.json
+!all_boxscore_urls.json
+
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+.vscode/
+.idea/
+
+*.log
+.DS_Store
+"@
