@@ -14,61 +14,74 @@ graph TD
     D -->|Partitioned & Clustered Tables| E[Fact Tables: Boxscores, Games, Absences]
     E -->|SQL Window Functions & Feature Engineering| F[v_player_features View]
     F -->|ML Regression & Time-Series Projections| G[Predictive Suite: Top 100 & Team Standings]
+```
 
+---
 
+## 🛠️ Tech Stack & Tooling
 
+* **Cloud Platform:** Google Cloud Platform (GCP)
+* **Compute / ETL:** GCP Cloud Run Jobs, Cloud Build, Google Artifact Registry, Docker
+* **Data Warehouse:** Google BigQuery (Partitioned by `game_date`, Clustered by `team_id` / `player_id`)
+* **Languages & Libraries:** Python 3.11, Pandas, BeautifulSoup4, Requests, NumPy
+* **Data Modeling & SQL:** BigQuery SQL, Analytical Window Functions (`LAG`, `ROWS BETWEEN`), DDL Views
+* **Predictive Models:** Weighted Time-Series Decay (MARCEL/Rolling Projection), Pythagorean Win Expectation
 
-🛠️ Tech Stack & Tooling
-Cloud Platform: Google Cloud Platform (GCP)
+---
 
-Compute / ETL: GCP Cloud Run Jobs, Cloud Build, Google Artifact Registry, Docker
+## 🗄️ Data Warehouse Schema (BigQuery)
 
-Data Warehouse: Google BigQuery (Partitioned by game_date, Clustered by team_id / player_id)
-
-Languages & Libraries: Python 3.11, Pandas, BeautifulSoup4, Requests, NumPy
-
-Data Modeling & SQL: BigQuery SQL, Analytical Window Functions (LAG, ROWS BETWEEN), DDL Views
-
-Predictive Models: Weighted Time-Series Decay (MARCEL/Rolling Projection), Pythagorean Win Expectation
-
-🗄️ Data Warehouse Schema (BigQuery)
-1. fact_player_boxscores
+### 1. `fact_player_boxscores`
 Individual player performance per game (Basic & Advanced Box Scores).
+* `player_id` (STRING), `player_name` (STRING), `team_id` (STRING)
+* `game_id` (STRING), `game_date` (DATE), `season` (STRING), `is_home` (BOOL)
+* `minutes` (FLOAT), `pts`, `trb`, `ast`, `stl`, `blk`, `tov`, `fg3`
+* `ts_pct` (True Shooting %), `usg_pct` (Usage Rate %), `off_rtg`, `def_rtg`
 
-player_id (STRING), player_name (STRING), team_id (STRING)
-
-game_id (STRING), game_date (DATE), season (STRING), is_home (BOOL)
-
-minutes (FLOAT), pts, trb, ast, stl, blk, tov, fg3
-
-ts_pct (True Shooting %), usg_pct (Usage Rate %), off_rtg, def_rtg
-
-2. fact_game_summaries
+### 2. `fact_game_summaries`
 Aggregated game metrics, team scores, offensive ratings, and game pace.
+* `game_id` (STRING), `game_date` (DATE), `season` (STRING)
+* `home_team` (STRING), `away_team` (STRING), `home_score` (INT64), `away_score` (INT64)
+* `pace` (FLOAT - Standardized NBA Possessions per 48 min), `home_off_rtg`, `away_off_rtg`
 
-game_id (STRING), game_date (DATE), season (STRING)
-
-home_team (STRING), away_team (STRING), home_score (INT64), away_score (INT64)
-
-pace (FLOAT - Standardized NBA Possessions per 48 min), home_off_rtg, away_off_rtg
-
-3. fact_player_absences
+### 3. `fact_player_absences`
 Tracks player availability, injuries, rest management, and coach decisions.
+* `game_id` (STRING), `game_date` (DATE), `season` (STRING), `team_id` (STRING), `player_id` (STRING), `player_name` (STRING), `status` (`DNP` / `INACTIVE`), `reason` (STRING)
 
-game_id (STRING), game_date (DATE), player_id (STRING), status (DNP / INACTIVE), reason (STRING)
-
-4. v_player_features (Analytical View)
+### 4. `v_player_features` (Analytical View)
 Prevents data leakage by leveraging SQL analytical windowing for prior performance:
+* Dynamic rolling metrics (`pts_avg_last_3`, `pts_avg_last_5`, `pts_avg_last_10`, `usg_avg_last_5`)
+* Rest schedule & fatigue tracking (`rest_days`, `is_back_to_back`)
 
-Dynamic rolling metrics (pts_avg_last_3, pts_avg_last_5, pts_avg_last_10, usg_avg_last_5)
+---
 
-Rest schedule & fatigue tracking (rest_days, is_back_to_back)
+## 🚀 Predictive Engines
 
-🚀 Predictive Engines
-Top 100 Player Season Projections (models/project_top_100_players.py):
+1. **Top 100 Player Season Projections (`models/project_top_100_players.py`):**
+   * Multi-season weighted decay model predicting `PTS`, `REB`, `AST`, `3PM`, `TS%`, and `USG%` for the 2026-27 season.
+2. **Team Win/Loss Simulator (`models/project_team_standings.py`):**
+   * Net Rating trajectory and conference standing simulation with an 82-game zero-sum league constraint (1,230 total regular season wins).
 
-Multi-season weighted decay model predicting PTS, REB, AST, 3PM, TS%, and USG% for the 2026-27 season.
+---
 
-Team Win/Loss Simulator (models/project_team_standings.py):
+## 📂 Repository Structure
 
-Net Rating trajectory and conference standing simulation with an 82-game zero-sum league constraint (1,230 total regular season wins).
+```text
+├── etl/
+│   ├── get_urls.py                     # Historical fixture & boxscore URL crawler
+│   ├── scrape_and_load.py              # Boxscore extraction & BigQuery batch loader
+│   ├── scrape_absences.py              # DNP / Injury parser
+│   └── find_remaining_absences.py      # Delta tracker for backfill jobs
+├── models/
+│   ├── project_top_100_players.py      # 2026-27 Top 100 player projection engine
+│   └── project_team_standings.py       # 2026-27 Team standings & win/loss simulator
+├── sql/
+│   ├── schema_fact_player_boxscores.sql
+│   ├── schema_fact_game_summaries.sql
+│   ├── schema_fact_player_absences.sql
+│   └── v_player_features.sql
+├── Dockerfile
+├── requirements.txt
+├── .gitignore
+└── README.md
+```
