@@ -1,54 +1,48 @@
 # 🏀 NBA Analytics & Predictive Modeling Suite (End-to-End GCP Pipeline)
 
-An enterprise-grade, serverless data engineering and predictive modeling pipeline built on **Google Cloud Platform (GCP)** and **BigQuery**. The system ingests, processes, and stores historical NBA data (2022–2026 seasons) across 6,600+ games and 100,000+ player records to simulate team standings and project player performance metrics.
+An end-to-end data engineering and predictive modeling pipeline built on **Google Cloud Platform (GCP)** and **BigQuery**. The system ingests, models, and analyzes historical NBA data across 6,600+ games and 100,000+ player records to simulate team standings and project player performance metrics for the 2026-27 season.
 
 ---
 
-## 🏗️ Architecture Overview
+## ⚡ Pipeline & Data Flow
 
-```mermaid
-graph TD
-    A[Basketball-Reference Data Source] -->|Python Scraping & Parsing| B[Docker Containerized ETL]
-    B -->|Serverless Job Orchestration| C[GCP Cloud Run Jobs]
-    C -->|Batch Upload| D[(Google BigQuery Data Warehouse)]
-    D -->|Partitioned & Clustered Tables| E[Fact Tables: Boxscores, Games, Absences]
-    E -->|SQL Window Functions & Feature Engineering| F[v_player_features View]
-    F -->|ML Regression & Time-Series Projections| G[Predictive Suite: Top 100 & Team Standings]
-```
+1. **Data Ingestion:** Automated scraping pipelines parse box scores, game metrics, and player absence/injury data from Basketball-Reference.
+2. **Serverless ETL (Cloud Run Jobs):** Containerized Python microservices run on GCP Cloud Run Jobs with automatic retry and rate-limiting controls.
+3. **Data Warehouse (BigQuery):** Data is modeled into date-partitioned and clustered Fact tables to optimize analytical query costs and speed.
+4. **Feature Engineering (SQL Views):** Analytical SQL window functions (`LAG`, `ROWS BETWEEN`) generate dynamic rolling metrics and rest day context without data leakage.
+5. **Predictive Modeling:** Multi-season weighted projections and Net Rating simulations produce player-level projections and conference win/loss standings.
 
 ---
 
-## 🛠️ Tech Stack & Tooling
+## 🛠️ Tech Stack
 
-* **Cloud Platform:** Google Cloud Platform (GCP)
-* **Compute / ETL:** GCP Cloud Run Jobs, Cloud Build, Google Artifact Registry, Docker
-* **Data Warehouse:** Google BigQuery (Partitioned by `game_date`, Clustered by `team_id` / `player_id`)
-* **Languages & Libraries:** Python 3.11, Pandas, BeautifulSoup4, Requests, NumPy
-* **Data Modeling & SQL:** BigQuery SQL, Analytical Window Functions (`LAG`, `ROWS BETWEEN`), DDL Views
-* **Predictive Models:** Weighted Time-Series Decay (MARCEL/Rolling Projection), Pythagorean Win Expectation
+* **Cloud:** Google Cloud Platform (GCP)
+* **Compute & Containerization:** Cloud Run Jobs, Cloud Build, Artifact Registry, Docker
+* **Data Warehouse:** Google BigQuery (Partitioned & Clustered Fact Tables)
+* **Languages & Frameworks:** Python 3.11, Pandas, NumPy, BeautifulSoup4, Requests
+* **Data Modeling:** BigQuery SQL, Analytical Window Functions
+* **Machine Learning / Statistics:** Weighted Time-Series Decay (MARCEL/Rolling Projection), Pythagorean Win Expectation
 
 ---
 
-## 🗄️ Data Warehouse Schema (BigQuery)
+## 🗄️ BigQuery Data Warehouse Schema
 
-### 1. `fact_player_boxscores`
-Individual player performance per game (Basic & Advanced Box Scores).
-* `player_id` (STRING), `player_name` (STRING), `team_id` (STRING)
-* `game_id` (STRING), `game_date` (DATE), `season` (STRING), `is_home` (BOOL)
-* `minutes` (FLOAT), `pts`, `trb`, `ast`, `stl`, `blk`, `tov`, `fg3`
+### `fact_player_boxscores`
+Tracks individual player box score metrics per game (Basic & Advanced).
+* `player_id`, `player_name`, `team_id`, `game_id`, `game_date`, `season`, `is_home`
+* `minutes`, `pts`, `trb`, `ast`, `stl`, `blk`, `tov`, `fg3`
 * `ts_pct` (True Shooting %), `usg_pct` (Usage Rate %), `off_rtg`, `def_rtg`
 
-### 2. `fact_game_summaries`
-Aggregated game metrics, team scores, offensive ratings, and game pace.
-* `game_id` (STRING), `game_date` (DATE), `season` (STRING)
-* `home_team` (STRING), `away_team` (STRING), `home_score` (INT64), `away_score` (INT64)
-* `pace` (FLOAT - Standardized NBA Possessions per 48 min), `home_off_rtg`, `away_off_rtg`
+### `fact_game_summaries`
+Aggregated game metrics, pace, and team efficiency ratings.
+* `game_id`, `game_date`, `season`, `home_team`, `away_team`, `home_score`, `away_score`
+* `pace` (NBA Possessions per 48 min), `home_off_rtg`, `away_off_rtg`
 
-### 3. `fact_player_absences`
-Tracks player availability, injuries, rest management, and coach decisions.
-* `game_id` (STRING), `game_date` (DATE), `season` (STRING), `team_id` (STRING), `player_id` (STRING), `player_name` (STRING), `status` (`DNP` / `INACTIVE`), `reason` (STRING)
+### `fact_player_absences`
+Tracks player availability, injuries, rest management, and coach decisions (DNP).
+* `game_id`, `game_date`, `season`, `team_id`, `player_id`, `player_name`, `status`, `reason`
 
-### 4. `v_player_features` (Analytical View)
+### `v_player_features` (Analytical View)
 Prevents data leakage by leveraging SQL analytical windowing for prior performance:
 * Dynamic rolling metrics (`pts_avg_last_3`, `pts_avg_last_5`, `pts_avg_last_10`, `usg_avg_last_5`)
 * Rest schedule & fatigue tracking (`rest_days`, `is_back_to_back`)
@@ -58,30 +52,9 @@ Prevents data leakage by leveraging SQL analytical windowing for prior performan
 ## 🚀 Predictive Engines
 
 1. **Top 100 Player Season Projections (`models/project_top_100_players.py`):**
-   * Multi-season weighted decay model predicting `PTS`, `REB`, `AST`, `3PM`, `TS%`, and `USG%` for the 2026-27 season.
+   * Multi-season weighted decay model predicting `PTS`, `REB`, `AST`, `3PM`, `TS%`, and `USG%` for regular starters and high-usage stars.
 2. **Team Win/Loss Simulator (`models/project_team_standings.py`):**
-   * Net Rating trajectory and conference standing simulation with an 82-game zero-sum league constraint (1,230 total regular season wins).
+   * Net Rating trajectory and conference standings simulation with an 82-game zero-sum league constraint (1,230 total regular season wins).
 
 ---
 
-## 📂 Repository Structure
-
-```text
-├── etl/
-│   ├── get_urls.py                     # Historical fixture & boxscore URL crawler
-│   ├── scrape_and_load.py              # Boxscore extraction & BigQuery batch loader
-│   ├── scrape_absences.py              # DNP / Injury parser
-│   └── find_remaining_absences.py      # Delta tracker for backfill jobs
-├── models/
-│   ├── project_top_100_players.py      # 2026-27 Top 100 player projection engine
-│   └── project_team_standings.py       # 2026-27 Team standings & win/loss simulator
-├── sql/
-│   ├── schema_fact_player_boxscores.sql
-│   ├── schema_fact_game_summaries.sql
-│   ├── schema_fact_player_absences.sql
-│   └── v_player_features.sql
-├── Dockerfile
-├── requirements.txt
-├── .gitignore
-└── README.md
-```
