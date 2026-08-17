@@ -1,19 +1,28 @@
-Set-Content -Path .gitignore -Value @"
-*.json
-!remaining_absences_urls.json
-!all_boxscore_urls.json
-
+# Virtual Environment
 .venv/
+env/
 venv/
-__pycache__/
-*.pyc
-*.pyo
 
+# Google Cloud & API Keys (KRİTİK)
+*.json
+!requirements*.json
+
+# Data & Scraping Artifacts
+*.csv
+all_boxscore_urls.json
+remaining_absences_urls.json
+missing_boxscore_urls.json
+
+# Temporary Scripts
+debug_*.py
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# OS / IDE
+.DS_Store
 .vscode/
 .idea/
-
-*.log
-.DS_Store
-"@
-# Docker
-Dockerfile
