@@ -18,9 +18,9 @@ MODEL 1A: Game Pace (toplam pozisyon / 48 dk)
 ------------------------------------------------------------
 
    [team_pace_model]
-   RMSE : 4.517
-   MAE  : 3.594
-   R²   : 0.2065
+   RMSE : 4.509
+   MAE  : 3.590
+   R²   : 0.2096
    Model kaydedildi -> models/team_pace_model.json
 
 ------------------------------------------------------------
@@ -28,9 +28,9 @@ MODEL 1B-HOME: Ev Sahibi Takım Puanı
 ------------------------------------------------------------
 
    [team_points_home_model]
-   RMSE : 12.847
-   MAE  : 10.326
-   R²   : 0.0201
+   RMSE : 12.805
+   MAE  : 10.252
+   R²   : 0.0264
    Model kaydedildi -> models/team_points_home_model.json
 
 ------------------------------------------------------------
@@ -38,20 +38,20 @@ MODEL 1B-AWAY: Deplasman Takımı Puanı
 ------------------------------------------------------------
 
    [team_points_away_model]
-   RMSE : 12.595
-   MAE  : 9.963
-   R²   : 0.0555
+   RMSE : 12.633
+   MAE  : 10.024
+   R²   : 0.0499
    Model kaydedildi -> models/team_points_away_model.json
 
 ------------------------------------------------------------
 FEATURE IMPORTANCE — Pace Modeli (İlk 10)
 ------------------------------------------------------------
-   roll_pace_10_opp_pregame                 0.2865
-   roll_pace_10                             0.2073
-   roll_pace_5                              0.2056
-   rest_days_opp_pregame                    0.1147
-   rest_days                                0.1066
-   is_home                                  0.0793
+   roll_pace_10_opp_pregame                 0.2856
+   roll_pace_10                             0.2144
+   roll_pace_5                              0.2011
+   rest_days_opp_pregame                    0.1104
+   rest_days                                0.1052
+   is_home                                  0.0833
 
    Meta dosyası kaydedildi -> models/team_model_meta.json
 
@@ -73,18 +73,18 @@ FEATURE IMPORTANCE — Pace Modeli (İlk 10)
 ------------------------------------------------------------
 MODEL: PLAYER_PTS_MODEL (hedef: pts)
 ------------------------------------------------------------
-   RMSE : 6.159
-   MAE  : 4.764
-   R²   : 0.4663
+   RMSE : 6.160
+   MAE  : 4.760
+   R²   : 0.4662
    Kaydedildi -> models/player_pts_model.json
-   Top 5 Feature: ['p_roll_pts_10', 'p_roll_pts_5', 'p_roll_min_10', 'p_roll_usg_10', 'p_pts_per_min_10']
+   Top 5 Feature: ['p_roll_pts_10', 'p_roll_pts_5', 'p_roll_min_10', 'p_roll_usg_10', 'p_roll_min_5']
 
 ------------------------------------------------------------
 MODEL: PLAYER_REB_MODEL (hedef: trb)
 ------------------------------------------------------------
-   RMSE : 2.559
-   MAE  : 1.966
-   R²   : 0.3879
+   RMSE : 2.558
+   MAE  : 1.965
+   R²   : 0.3889
    Kaydedildi -> models/player_reb_model.json
    Top 5 Feature: ['p_roll_trb_10', 'p_roll_trb_5', 'p_trb_per_min_10', 'p_roll_min_5', 'p_roll_fg3_10']
 
@@ -93,7 +93,7 @@ MODEL: PLAYER_AST_MODEL (hedef: ast)
 ------------------------------------------------------------
    RMSE : 1.904
    MAE  : 1.424
-   R²   : 0.4564
+   R²   : 0.4565
    Kaydedildi -> models/player_ast_model.json
    Top 5 Feature: ['p_roll_ast_10', 'p_roll_ast_5', 'p_ast_per_min_10', 'p_roll_min_10', 'p_roll_min_5']
 
@@ -102,25 +102,25 @@ MODEL: PLAYER_3PM_MODEL (hedef: fg3)
 ------------------------------------------------------------
    RMSE : 1.299
    MAE  : 0.956
-   R²   : 0.2675
+   R²   : 0.2682
    Kaydedildi -> models/player_3pm_model.json
    Top 5 Feature: ['p_roll_fg3_10', 'p_roll_fg3_5', 'p_roll_ts_10', 'p_trb_per_min_10', 'p_roll_pts_10']
 
 ------------------------------------------------------------
 MODEL: PLAYER_STL_MODEL (hedef: stl)
 ------------------------------------------------------------
-   RMSE : 0.986
+   RMSE : 0.987
    MAE  : 0.769
-   R²   : 0.0677
+   R²   : 0.0670
    Kaydedildi -> models/player_stl_model.json
    Top 5 Feature: ['p_roll_stl_10', 'p_roll_ast_10', 'p_roll_stl_5', 'p_roll_min_5', 'p_roll_min_10']
 
 ------------------------------------------------------------
 MODEL: PLAYER_BLK_MODEL (hedef: blk)
 ------------------------------------------------------------
-   RMSE : 0.773
-   MAE  : 0.572
-   R²   : 0.1739
+   RMSE : 0.774
+   MAE  : 0.573
+   R²   : 0.1733
    Kaydedildi -> models/player_blk_model.json
    Top 5 Feature: ['p_roll_blk_10', 'p_roll_blk_5', 'p_trb_per_min_10', 'p_roll_trb_10', 'p_roll_fg3_10']
 
