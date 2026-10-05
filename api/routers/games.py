@@ -104,28 +104,20 @@ def get_game_detail(event_id: str):
     Tek bir macin detayini dondur.
     Oyuncu prop'lari flat player_props listesinden game_id ile filtrelenir.
     """
-    # En son tahmin dosyasini bul
-    latest = OUTPUT_DIR / "predictions_latest.json"
-    # Tarihe gore dene
-    pred_file: Path | None = None
-    if latest.exists():
-        pred_file = latest
-    else:
-        # output/ altindaki ilk dosyayi dene
-        files = sorted(OUTPUT_DIR.glob("predictions_2*.json"), reverse=True)
-        if files:
-            pred_file = files[0]
-
-    if not pred_file:
-        raise HTTPException(status_code=404, detail="Henuz tahmin uretilmemis.")
-
-    data = json.loads(pred_file.read_text(encoding="utf-8"))
-
-    # game_id ile eslesen mac satirini bul
-    game_row = next(
-        (g for g in data.get("games", []) if g.get("game_id") == event_id),
-        None,
+    # game_id'yi iceren tahmin dosyasini bul (once latest, sonra tum tarihli dosyalar)
+    candidates = [OUTPUT_DIR / "predictions_latest.json"] + sorted(
+        OUTPUT_DIR.glob("predictions_2*.json"), reverse=True
     )
+    data, game_row = None, None
+    for f in candidates:
+        if not f.exists():
+            continue
+        d = json.loads(f.read_text(encoding="utf-8"))
+        game_row = next((g for g in d.get("games", []) if g.get("game_id") == event_id), None)
+        if game_row:
+            data = d
+            break
+
     if not game_row:
         raise HTTPException(status_code=404, detail=f"Mac bulunamadi: {event_id}")
 

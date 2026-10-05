@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 
 class PlayerProp(BaseModel):
-    player_id:    int
+    player_id:    int | str
     name:         str
     position:     str
     proj_minutes: float
@@ -23,7 +23,7 @@ class PlayerProp(BaseModel):
 
 
 class InjuryEntry(BaseModel):
-    player_id:   int
+    player_id:   int | str
     name:        str
     position:    str
     status:      str
