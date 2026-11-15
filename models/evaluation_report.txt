@@ -3,7 +3,7 @@
 ========================================================================
 
 1. Takım feature tablosu yükleniyor: data/team_features.parquet
-   -> 13,144 satır, 27 kolon yüklendi.
+   -> 12,240 satır, 27 kolon yüklendi.
 
 2. Pace özellikleri (6): ['roll_pace_5', 'roll_pace_10', 'rest_days', 'roll_pace_10_opp_pregame', 'rest_days_opp_pregame', 'is_home']
    Puan özellikleri (15): ['roll_ortg_5', 'roll_ortg_10', 'roll_drtg_5', 'roll_drtg_10', 'roll_pts_5', 'roll_pts_10', 'roll_pace_5', 'roll_pace_10', 'rest_days', 'roll_ortg_10_opp_pregame', 'roll_drtg_10_opp_pregame', 'roll_pts_10_opp_pregame', 'roll_pace_10_opp_pregame', 'rest_days_opp_pregame', 'is_home']
@@ -11,16 +11,16 @@
 3. Time-series split uygulanıyor (son sezon = validation set)...
    Eğitim sezonları : ['2021-22', '2022-23', '2023-24', '2024-25']
    Validation sezonu: 2025-26
-   Train satırı: 10,502 | Val satırı: 2,642
+   Train satırı: 9,780 | Val satırı: 2,460
 
 ------------------------------------------------------------
 MODEL 1A: Game Pace (toplam pozisyon / 48 dk)
 ------------------------------------------------------------
 
    [team_pace_model]
-   RMSE : 4.509
-   MAE  : 3.590
-   R²   : 0.2096
+   RMSE : 4.472
+   MAE  : 3.553
+   R²   : 0.2126
    Model kaydedildi -> models/team_pace_model.json
 
 ------------------------------------------------------------
@@ -28,9 +28,9 @@ MODEL 1B-HOME: Ev Sahibi Takım Puanı
 ------------------------------------------------------------
 
    [team_points_home_model]
-   RMSE : 12.805
-   MAE  : 10.252
-   R²   : 0.0264
+   RMSE : 12.859
+   MAE  : 10.320
+   R²   : 0.0155
    Model kaydedildi -> models/team_points_home_model.json
 
 ------------------------------------------------------------
@@ -38,20 +38,20 @@ MODEL 1B-AWAY: Deplasman Takımı Puanı
 ------------------------------------------------------------
 
    [team_points_away_model]
-   RMSE : 12.633
-   MAE  : 10.024
-   R²   : 0.0499
+   RMSE : 12.415
+   MAE  : 9.799
+   R²   : 0.0602
    Model kaydedildi -> models/team_points_away_model.json
 
 ------------------------------------------------------------
 FEATURE IMPORTANCE — Pace Modeli (İlk 10)
 ------------------------------------------------------------
-   roll_pace_10_opp_pregame                 0.2856
-   roll_pace_10                             0.2144
-   roll_pace_5                              0.2011
-   rest_days_opp_pregame                    0.1104
-   rest_days                                0.1052
-   is_home                                  0.0833
+   roll_pace_10_opp_pregame                 0.2738
+   roll_pace_10                             0.2118
+   roll_pace_5                              0.1976
+   rest_days_opp_pregame                    0.1196
+   rest_days                                0.1101
+   is_home                                  0.0871
 
    Meta dosyası kaydedildi -> models/team_model_meta.json
 
@@ -60,68 +60,68 @@ FEATURE IMPORTANCE — Pace Modeli (İlk 10)
 ========================================================================
 
 1. Oyuncu feature tablosu yükleniyor: data/player_features.parquet
-   -> 139,606 satır, 62 kolon yüklendi.
-   -> 8+ dakika filtresi sonrası: 121,527 satır
+   -> 129,966 satır, 62 kolon yüklendi.
+   -> 8+ dakika filtresi sonrası: 113,752 satır
 
-2. Kullanılan özellikler (29): ['p_roll_min_5', 'p_roll_min_10', 'p_roll_pts_5', 'p_roll_pts_10', 'p_roll_trb_5', 'p_roll_trb_10', 'p_roll_ast_5', 'p_roll_ast_10', 'p_roll_fg3_5', 'p_roll_fg3_10', 'p_roll_stl_5', 'p_roll_stl_10', 'p_roll_blk_5', 'p_roll_blk_10', 'p_roll_usg_5', 'p_roll_usg_10', 'p_roll_ts_5', 'p_roll_ts_10', 'p_pts_per_min_10', 'p_trb_per_min_10', 'p_ast_per_min_10', 'player_rest_days', 'is_home', 'roll_pace_10', 'roll_ortg_10', 'roll_drtg_10', 'roll_drtg_10_opp_pregame', 'roll_pace_10_opp_pregame', 'actual_game_pace']
+2. Kullanılan özellikler (28): ['p_roll_min_5', 'p_roll_min_10', 'p_roll_pts_5', 'p_roll_pts_10', 'p_roll_trb_5', 'p_roll_trb_10', 'p_roll_ast_5', 'p_roll_ast_10', 'p_roll_fg3_5', 'p_roll_fg3_10', 'p_roll_stl_5', 'p_roll_stl_10', 'p_roll_blk_5', 'p_roll_blk_10', 'p_roll_usg_5', 'p_roll_usg_10', 'p_roll_ts_5', 'p_roll_ts_10', 'p_pts_per_min_10', 'p_trb_per_min_10', 'p_ast_per_min_10', 'player_rest_days', 'is_home', 'roll_pace_10', 'roll_ortg_10', 'roll_drtg_10', 'roll_drtg_10_opp_pregame', 'roll_pace_10_opp_pregame']
 
 3. Time-series split (son sezon = validation)...
    Eğitim  : ['2021-22', '2022-23', '2023-24', '2024-25']
    Valida. : 2025-26
-   Train: 96,628 | Val: 24,899
+   Train: 90,469 | Val: 23,283
 
 ------------------------------------------------------------
 MODEL: PLAYER_PTS_MODEL (hedef: pts)
 ------------------------------------------------------------
-   RMSE : 6.160
-   MAE  : 4.760
-   R²   : 0.4662
+   RMSE : 6.173
+   MAE  : 4.775
+   R²   : 0.4611
    Kaydedildi -> models/player_pts_model.json
    Top 5 Feature: ['p_roll_pts_10', 'p_roll_pts_5', 'p_roll_min_10', 'p_roll_usg_10', 'p_roll_min_5']
 
 ------------------------------------------------------------
 MODEL: PLAYER_REB_MODEL (hedef: trb)
 ------------------------------------------------------------
-   RMSE : 2.558
-   MAE  : 1.965
-   R²   : 0.3889
+   RMSE : 2.561
+   MAE  : 1.969
+   R²   : 0.3848
    Kaydedildi -> models/player_reb_model.json
    Top 5 Feature: ['p_roll_trb_10', 'p_roll_trb_5', 'p_trb_per_min_10', 'p_roll_min_5', 'p_roll_fg3_10']
 
 ------------------------------------------------------------
 MODEL: PLAYER_AST_MODEL (hedef: ast)
 ------------------------------------------------------------
-   RMSE : 1.904
-   MAE  : 1.424
-   R²   : 0.4565
+   RMSE : 1.913
+   MAE  : 1.433
+   R²   : 0.4536
    Kaydedildi -> models/player_ast_model.json
    Top 5 Feature: ['p_roll_ast_10', 'p_roll_ast_5', 'p_ast_per_min_10', 'p_roll_min_10', 'p_roll_min_5']
 
 ------------------------------------------------------------
 MODEL: PLAYER_3PM_MODEL (hedef: fg3)
 ------------------------------------------------------------
-   RMSE : 1.299
-   MAE  : 0.956
-   R²   : 0.2682
+   RMSE : 1.300
+   MAE  : 0.957
+   R²   : 0.2702
    Kaydedildi -> models/player_3pm_model.json
-   Top 5 Feature: ['p_roll_fg3_10', 'p_roll_fg3_5', 'p_roll_ts_10', 'p_trb_per_min_10', 'p_roll_pts_10']
+   Top 5 Feature: ['p_roll_fg3_10', 'p_roll_fg3_5', 'p_roll_ts_10', 'p_roll_pts_10', 'p_trb_per_min_10']
 
 ------------------------------------------------------------
 MODEL: PLAYER_STL_MODEL (hedef: stl)
 ------------------------------------------------------------
-   RMSE : 0.987
+   RMSE : 0.985
    MAE  : 0.769
-   R²   : 0.0670
+   R²   : 0.0615
    Kaydedildi -> models/player_stl_model.json
-   Top 5 Feature: ['p_roll_stl_10', 'p_roll_ast_10', 'p_roll_stl_5', 'p_roll_min_5', 'p_roll_min_10']
+   Top 5 Feature: ['p_roll_stl_10', 'p_roll_ast_10', 'p_roll_stl_5', 'p_roll_min_10', 'p_roll_min_5']
 
 ------------------------------------------------------------
 MODEL: PLAYER_BLK_MODEL (hedef: blk)
 ------------------------------------------------------------
-   RMSE : 0.774
-   MAE  : 0.573
-   R²   : 0.1733
+   RMSE : 0.769
+   MAE  : 0.571
+   R²   : 0.1686
    Kaydedildi -> models/player_blk_model.json
-   Top 5 Feature: ['p_roll_blk_10', 'p_roll_blk_5', 'p_trb_per_min_10', 'p_roll_trb_10', 'p_roll_fg3_10']
+   Top 5 Feature: ['p_roll_blk_10', 'p_roll_blk_5', 'p_trb_per_min_10', 'p_roll_fg3_10', 'p_roll_trb_10']
 
    Meta dosyası -> models/player_model_meta.json

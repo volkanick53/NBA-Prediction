@@ -101,27 +101,44 @@ def get_scoreboard(date_str: str) -> list[dict]:
 # Oyuncu tahminlerinden dışlanacak statüler
 EXCLUDED_STATUSES = {"Out", "Doubtful", "Injured Reserve", "Suspended", "Out For Season"}
 
+def _athlete_id(athlete: dict) -> int:
+    """ESPN injuries payload has no athlete 'id'; parse it from the player link."""
+    if athlete.get("id"):
+        return int(athlete["id"])
+    for link in athlete.get("links", []):
+        href = link.get("href", "")
+        if "/id/" in href:
+            try:
+                return int(href.split("/id/")[1].split("/")[0])
+            except ValueError:
+                pass
+    return 0
+
+
 def get_injuries() -> dict[int, list[dict]]:
     """
     Lig geneli güncel sakatlık raporunu çek.
 
-    Dönen dict: { team_id: [ {player_id, name, status, description}, ... ] }
+    Dönen dict: { team_id: [ {player_id, name, status, description, team_name}, ... ] }
     """
     data = _get(f"{BASE}/injuries")
     injured: dict[int, list[dict]] = {}
 
     for team_entry in data.get("injuries", []):
-        team_id = int(team_entry.get("team", {}).get("id", 0))
+        # Team id/name are top-level on the entry (not nested under "team")
+        team_id = int(team_entry.get("id") or team_entry.get("team", {}).get("id", 0))
+        team_name = team_entry.get("displayName", "")
         team_injuries = []
         for inj in team_entry.get("injuries", []):
             athlete = inj.get("athlete", {})
             status  = inj.get("status", "")
             team_injuries.append({
-                "player_id":   int(athlete.get("id", 0)),
+                "player_id":   _athlete_id(athlete),
                 "name":        athlete.get("displayName", ""),
                 "position":    athlete.get("position", {}).get("abbreviation", ""),
                 "status":      status,
                 "description": inj.get("longComment", ""),
+                "team_name":   team_name,
                 "is_excluded": status in EXCLUDED_STATUSES,
             })
         if team_injuries:
@@ -141,16 +158,23 @@ def get_roster(team_id: int) -> list[dict]:
     Dönen liste: [ {player_id, name, position, jersey, status}, ... ]
     """
     data = _get(f"{BASE}/teams/{team_id}/roster")
+    athletes: list[dict] = []
+    for entry in data.get("athletes", []):
+        # Flat payload: entry is an athlete. Grouped payload: entry has 'items'.
+        if "items" in entry:
+            athletes.extend(entry["items"])
+        else:
+            athletes.append(entry)
+
     players = []
-    for group in data.get("athletes", []):
-        for athlete in group.get("items", []):
-            players.append({
-                "player_id": int(athlete.get("id", 0)),
-                "name":      athlete.get("displayName", ""),
-                "position":  athlete.get("position", {}).get("abbreviation", ""),
-                "jersey":    athlete.get("jersey", ""),
-                "status":    athlete.get("status", {}).get("type", {}).get("name", "Active"),
-            })
+    for athlete in athletes:
+        players.append({
+            "player_id": int(athlete.get("id", 0)),
+            "name":      athlete.get("displayName", ""),
+            "position":  athlete.get("position", {}).get("abbreviation", ""),
+            "jersey":    athlete.get("jersey", ""),
+            "status":    athlete.get("status", {}).get("name", "Active"),
+        })
     log.info("Roster (team %d): %d oyuncu", team_id, len(players))
     return players
 

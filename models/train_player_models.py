@@ -83,7 +83,7 @@ PLAYER_BASE_FEATURES = [
     "roll_drtg_10",
     "roll_drtg_10_opp_pregame",   # rakip savunma kalitesi
     "roll_pace_10_opp_pregame",
-    "actual_game_pace",           # Stage 1 tahmininde gerçek ile değiştir
+    # NOT: "actual_game_pace" kasitli olarak cikarildi (maç sonrasi bilgi = leakage)
 ]
 
 # Mevcut kolonları seç (bazıları join'de kaybolmuş olabilir)
@@ -137,6 +137,7 @@ XGB_PARAMS = dict(
 # 7. Her Hedef için Eğitim
 # ---------------------------------------------------------------
 results = {}
+resid_std = {}
 
 for target_col, model_name in TARGETS.items():
     if target_col not in df.columns:
@@ -175,6 +176,7 @@ for target_col, model_name in TARGETS.items():
     log(f"   Kaydedildi -> {save_path}")
 
     results[model_name] = {"rmse": round(rmse, 3), "mae": round(mae, 3), "r2": round(r2, 4)}
+    resid_std[target_col] = round(float(np.std(y_vl.to_numpy() - preds)), 3)
 
     # Top 5 feature importance
     fi = pd.Series(model.feature_importances_, index=AVAILABLE).sort_values(ascending=False)
@@ -189,6 +191,7 @@ meta = {
     "min_minutes_filter": MIN_MINUTES,
     "val_season": str(val_season),
     "results": results,
+    "resid_std": resid_std,
 }
 with open("models/player_model_meta.json", "w") as f:
     json.dump(meta, f, indent=2)

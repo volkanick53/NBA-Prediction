@@ -44,6 +44,12 @@ import numpy as np
 import pandas as pd
 from scipy.stats import norm
 from xgboost import XGBRegressor
+import sys
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
 
 # ---------------------------------------------------------------
 # Logging
@@ -70,11 +76,12 @@ TEAM_PROJ_FILE       = Path("proj_team_wins_2026_27.csv")
 SEASON_START = "2026-10-20"
 
 # Belirsizlik: sezon basinda (kadro yeni, veri yok) daha yuksek
-SCORE_STD_OPENER = 13.0
-SCORE_STD_BASE   = 12.0
+# Calibrated on 2025-26 holdout (models/backtest_team.py): sigma 12 was overconfident
+SCORE_STD_OPENER = 16.5
+SCORE_STD_BASE   = 16.0
 
 # Stage 1 blend agirligi (XGBoost team points modeli)
-XGB_TEAM_WEIGHT = 0.20
+XGB_TEAM_WEIGHT = 0.30
 
 # Stage 2 blend: XGBoost noisy rolling girdilerle egitildi; MARCELS girdisi zaten
 # regress edilmis oldugundan saf XGB yildizlari cift shrink eder -> %50/%50 blend
@@ -318,6 +325,74 @@ def load_player_priors() -> dict[str, list[dict]]:
     return teams
 
 
+# ---------------------------------------------------------------
+# Injuries (ESPN) -> roster eslestirme
+# ---------------------------------------------------------------
+INJURY_CACHE = Path("data/injuries_latest.json")
+OUT_STATUSES = {"Out", "Doubtful", "Injured Reserve", "Suspended", "Out For Season"}
+NET_PENALTY_PER_PPG = 0.15   # heuristic: ~4 net-rating pts for a 28ppg/34mpg star
+NET_PENALTY_CAP = 8.0
+
+
+def norm_name(s: str) -> str:
+    """Lowercase, accent-free, suffix-free name key for cross-source matching."""
+    import re
+    import unicodedata
+    s = fix_name(str(s))
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
+    s = re.sub(r"[^a-z ]", "", s.lower().replace(".", "").replace("'", ""))
+    return " ".join(w for w in s.split() if w not in {"jr", "sr", "ii", "iii", "iv"})
+
+
+def load_injuries() -> dict[str, dict]:
+    """normalized player name -> {status, description}. Live ESPN, cached fallback."""
+    try:
+        from engine.espn_client import get_injuries
+        raw = get_injuries()
+        flat = {norm_name(i["name"]): {"status": i["status"], "name": i["name"],
+                                       "description": i["description"][:240]}
+                for lst in raw.values() for i in lst}
+        INJURY_CACHE.parent.mkdir(exist_ok=True)
+        INJURY_CACHE.write_text(json.dumps(
+            {"fetched_at": datetime.now(timezone.utc).isoformat(), "players": flat},
+            ensure_ascii=False, indent=1), encoding="utf-8")
+        log.info("Sakatlik raporu (canli): %d oyuncu", len(flat))
+        return flat
+    except Exception as exc:  # network down etc.
+        if INJURY_CACHE.exists():
+            cached = json.loads(INJURY_CACHE.read_text(encoding="utf-8"))
+            log.warning("ESPN erisilemedi (%s); cache kullaniliyor: %s", exc, cached["fetched_at"])
+            return cached["players"]
+        log.warning("Sakatlik verisi yok (%s) - sakatliksiz devam.", exc)
+        return {}
+
+
+def apply_injuries(players: list[dict], injuries: dict[str, dict]) -> tuple[list[dict], list[dict], float]:
+    """Returns (available players, injury report rows, net-rating penalty)."""
+    avail, report, penalty = [], [], 0.0
+    for p in players:
+        inj = injuries.get(norm_name(p["name"]))
+        if not inj:
+            avail.append({**p, "injury_status": None})
+            continue
+        out = inj["status"] in OUT_STATUSES
+        report.append({"player": p["name"], "status": inj["status"],
+                       "excluded": out, "note": inj["description"]})
+        if out:
+            penalty += NET_PENALTY_PER_PPG * p["ppg"] * min(p["mpg"] / 34.0, 1.0)
+        else:
+            avail.append({**p, "injury_status": inj["status"]})
+    return avail, report, min(penalty, NET_PENALTY_CAP)
+
+
+def adjust_prior(prior: dict, penalty: float) -> dict:
+    """Shift a team prior's strength down by `penalty` net-rating points."""
+    if penalty <= 0:
+        return prior
+    return {**prior, "ortg": prior["ortg"] - 0.6 * penalty,
+            "drtg": prior["drtg"] + 0.4 * penalty, "net": prior["net"] - penalty}
+
+
 def allocate_minutes(players: list[dict]) -> list[dict]:
     """
     Rotasyon secimi + 240 dk kisiti (hiyerarsik).
@@ -482,6 +557,7 @@ def predict_player_props(
             pts = pts + diff * w / w.sum()
         preds["pts"] = np.clip(pts, 0, None)
 
+    sd = registry.player_meta.get("resid_std", {})
     results = []
     for i, p in enumerate(rotation):
         results.append({
@@ -498,6 +574,10 @@ def predict_player_props(
             "proj_stl": round(float(preds["stl"][i]), 1),
             "proj_blk": round(float(preds["blk"][i]), 1),
             "season_proj_ppg": round(p["ppg"], 1),
+            "injury_status": p.get("injury_status"),
+            "sd_pts": sd.get("pts"), "sd_trb": sd.get("trb"), "sd_ast": sd.get("ast"),
+            "sd_fg3": sd.get("fg3"), "sd_stl": sd.get("stl"), "sd_blk": sd.get("blk"),
+            "low_confidence_stats": ["stl"],
         })
     return results
 
@@ -516,8 +596,75 @@ def convert_et_to_tr(date_str: str, time_et_str: str) -> str:
 # ---------------------------------------------------------------
 # Tek gun pipeline
 # ---------------------------------------------------------------
+def predict_matchup(
+    registry, home: str, away: str, gid: str, target_date: str,
+    match_time_tr: str, is_cup: bool,
+    home_prior: dict, away_prior: dict,
+    home_players: list[dict], away_players: list[dict],
+    h_rest: int, a_rest: int, is_opener: bool,
+    lg_rtg: float, lg_pace: float, injuries: dict,
+    h_in_weight: float = 0.0, a_in_weight: float = 0.0,
+) -> tuple[dict, list[dict]]:
+    """Single matchup -> (game dict, player prop rows). Shared by offline + live engines.
+
+    home/away are BBRef team abbreviations. Priors/players may already be blended
+    with in-season data by the caller (h_in_weight/a_in_weight are informational).
+    """
+    h_avail, h_inj, h_pen = apply_injuries(home_players, injuries)
+    a_avail, a_inj, a_pen = apply_injuries(away_players, injuries)
+    hp = adjust_prior(home_prior, h_pen)
+    ap = adjust_prior(away_prior, a_pen)
+    s1 = predict_game_team(registry, hp, ap, h_rest, a_rest, lg_rtg, lg_pace, is_opener)
+
+    h_rot = allocate_minutes(h_avail)
+    a_rot = allocate_minutes(a_avail)
+    h_props = predict_player_props(registry, h_rot, hp, ap, 1, h_rest,
+                                   s1["pred_game_pace"], s1["pred_home_score"])
+    a_props = predict_player_props(registry, a_rot, ap, hp, 0, a_rest,
+                                   s1["pred_game_pace"], s1["pred_away_score"])
+
+    winner = home if s1["home_win_prob"] >= 50 else away
+    game = {
+        "game_id": gid,
+        "game_date": target_date.replace("-", ""),
+        "match_time_tr": match_time_tr,
+        "home_team": espn_abbr(home),
+        "away_team": espn_abbr(away),
+        "home_team_full": TEAM_FULL_NAMES.get(home, home),
+        "away_team_full": TEAM_FULL_NAMES.get(away, away),
+        "home_logo": LOGO_TPL.format(abbr=espn_abbr(home).lower()),
+        "away_logo": LOGO_TPL.format(abbr=espn_abbr(away).lower()),
+        "proj_home_score": s1["pred_home_score"],
+        "proj_away_score": s1["pred_away_score"],
+        "proj_spread": s1["pred_spread"],
+        "proj_total": s1["pred_total"],
+        "pred_game_pace": s1["pred_game_pace"],
+        "home_win_prob": s1["home_win_prob"],
+        "away_win_prob": s1["away_win_prob"],
+        "predicted_winner": espn_abbr(winner),
+        "home_rest_days": h_rest,
+        "away_rest_days": a_rest,
+        "home_net_rating_prior": round(hp["net"], 2),
+        "away_net_rating_prior": round(ap["net"], 2),
+        "home_injury_penalty": round(h_pen, 2),
+        "away_injury_penalty": round(a_pen, 2),
+        "injury_report": {espn_abbr(home): h_inj, espn_abbr(away): a_inj},
+        "model_breakdown": {
+            "ratings": [s1["ratings_home_pts"], s1["ratings_away_pts"]],
+            "xgboost": [s1["xgb_home_pts"], s1["xgb_away_pts"]],
+            "xgb_weight": XGB_TEAM_WEIGHT,
+            "in_season_weight_home": round(h_in_weight, 2),
+            "in_season_weight_away": round(a_in_weight, 2),
+        },
+        "is_nba_cup": bool(is_cup),
+    }
+    props = [{**p, "game_id": gid} for p in h_props + a_props]
+    return game, props
+
+
 def run_date(target_date: str, registry, team_priors, lg_rtg, lg_pace,
-             player_priors, sched, rest_lookup) -> dict | None:
+             player_priors, sched, rest_lookup, injuries=None) -> dict | None:
+    injuries = injuries or {}
     games_today = sched[sched["game_date"] == target_date]
     if games_today.empty:
         log.warning("%s icin mac yok.", target_date)
@@ -529,60 +676,27 @@ def run_date(target_date: str, registry, team_priors, lg_rtg, lg_pace,
     all_games, all_props = [], []
     for _, g in games_today.iterrows():
         home, away = bbref(g["home_team"]), bbref(g["away_team"])
-        gid = str(g["game_id"])
         h_rest = rest_lookup.get((home, target_date), REST_DAYS_CAP)
         a_rest = rest_lookup.get((away, target_date), REST_DAYS_CAP)
         h_gp = games_played_before(sched, home, target_date)
         a_gp = games_played_before(sched, away, target_date)
-        is_opener = (h_gp == 0 or a_gp == 0)
 
-        hp, ap = team_priors[home], team_priors[away]
-        s1 = predict_game_team(registry, hp, ap, h_rest, a_rest, lg_rtg, lg_pace, is_opener)
-
-        h_rot = allocate_minutes(player_priors.get(home, []))
-        a_rot = allocate_minutes(player_priors.get(away, []))
-        h_props = predict_player_props(registry, h_rot, hp, ap, 1, h_rest,
-                                       s1["pred_game_pace"], s1["pred_home_score"])
-        a_props = predict_player_props(registry, a_rot, ap, hp, 0, a_rest,
-                                       s1["pred_game_pace"], s1["pred_away_score"])
-
-        winner = home if s1["home_win_prob"] >= 50 else away
-        all_games.append({
-            "game_id": gid,
-            "game_date": target_date.replace("-", ""),
-            "match_time_tr": convert_et_to_tr(target_date, str(g.get("game_time_et", ""))),
-            "home_team": espn_abbr(home),
-            "away_team": espn_abbr(away),
-            "home_team_full": TEAM_FULL_NAMES.get(home, home),
-            "away_team_full": TEAM_FULL_NAMES.get(away, away),
-            "home_logo": LOGO_TPL.format(abbr=espn_abbr(home).lower()),
-            "away_logo": LOGO_TPL.format(abbr=espn_abbr(away).lower()),
-            "proj_home_score": s1["pred_home_score"],
-            "proj_away_score": s1["pred_away_score"],
-            "proj_spread": s1["pred_spread"],
-            "proj_total": s1["pred_total"],
-            "pred_game_pace": s1["pred_game_pace"],
-            "home_win_prob": s1["home_win_prob"],
-            "away_win_prob": s1["away_win_prob"],
-            "predicted_winner": espn_abbr(winner),
-            "home_rest_days": h_rest,
-            "away_rest_days": a_rest,
-            "home_net_rating_prior": round(hp["net"], 2),
-            "away_net_rating_prior": round(ap["net"], 2),
-            "model_breakdown": {
-                "ratings": [s1["ratings_home_pts"], s1["ratings_away_pts"]],
-                "xgboost": [s1["xgb_home_pts"], s1["xgb_away_pts"]],
-                "xgb_weight": XGB_TEAM_WEIGHT,
-                "in_season_weight_home": round(h_gp / (h_gp + K_TEAM_PRIOR), 2) if h_gp else 0.0,
-            },
-            "is_nba_cup": bool(g.get("is_nba_cup_group", False)),
-        })
-        for p in h_props + a_props:
-            all_props.append({**p, "game_id": gid})
+        game, props = predict_matchup(
+            registry, home, away, str(g["game_id"]), target_date,
+            convert_et_to_tr(target_date, str(g.get("game_time_et", ""))),
+            bool(g.get("is_nba_cup_group", False)),
+            team_priors[home], team_priors[away],
+            player_priors.get(home, []), player_priors.get(away, []),
+            h_rest, a_rest, (h_gp == 0 or a_gp == 0), lg_rtg, lg_pace, injuries,
+            h_gp / (h_gp + K_TEAM_PRIOR) if h_gp else 0.0,
+            a_gp / (a_gp + K_TEAM_PRIOR) if a_gp else 0.0,
+        )
+        all_games.append(game)
+        all_props.extend(props)
 
         log.info("  %s @ %s  ->  %.1f - %.1f | spread %+.1f | total %.1f | ev %%%.1f | rest %d/%d",
-                 away, home, s1["pred_away_score"], s1["pred_home_score"],
-                 s1["pred_spread"], s1["pred_total"], s1["home_win_prob"], a_rest, h_rest)
+                 away, home, game["proj_away_score"], game["proj_home_score"],
+                 game["proj_spread"], game["proj_total"], game["home_win_prob"], a_rest, h_rest)
 
     compact = target_date.replace("-", "")
     output = {
@@ -628,12 +742,14 @@ def main(start_date: str, days: int) -> None:
     sched = pd.read_csv(SCHEDULE_FILE)
     rest_lookup = build_rest_lookup(sched)
 
+    injuries = load_injuries()
+
     d0 = datetime.strptime(start_date, "%Y-%m-%d")
     outputs = []
     for i in range(days):
         ds = (d0 + timedelta(days=i)).strftime("%Y-%m-%d")
         out = run_date(ds, registry, team_priors, lg_rtg, lg_pace,
-                       player_priors, sched, rest_lookup)
+                       player_priors, sched, rest_lookup, injuries)
         if out:
             outputs.append(out)
             print_summary(out)

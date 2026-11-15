@@ -1,4 +1,5 @@
 import os
+import db_dtypes  # noqa: F401  (BigQuery 'dbdate' dtype for the cached parquet)
 import numpy as np
 import pandas as pd
 from google.cloud import bigquery
@@ -54,6 +55,17 @@ for col in numeric_cols:
 
 df_raw["game_date"] = pd.to_datetime(df_raw["game_date"])
 df_raw["is_home"] = df_raw["is_home"].astype(str).str.lower().isin(["true", "1"]).astype(int)
+
+# BigQuery'de season_type hepsi 'Regular Season' etiketli (playoff/play-in dahil).
+# Takimin sezondaki 82. macindan sonrasi = postseason -> egitimden ve rolling'den cikar.
+_tg = df_raw[["game_id", "season", "team_id", "game_date"]].drop_duplicates()
+_tg = _tg.sort_values(["team_id", "game_date", "game_id"])
+_tg["team_game_no"] = _tg.groupby(["team_id", "season"]).cumcount() + 1
+_post_keys = _tg.loc[_tg["team_game_no"] > 82, ["game_id", "team_id"]]
+_before = len(df_raw)
+df_raw = df_raw.merge(_post_keys.assign(_post=1), on=["game_id", "team_id"], how="left")
+df_raw = df_raw[df_raw["_post"].isna()].drop(columns="_post").reset_index(drop=True)
+print(f"   -> Postseason/play-in satirlari cikarildi: {_before - len(df_raw):,} (kalan {len(df_raw):,})")
 
 # ---------------------------------------------------------
 # 3. Takım Seviyesine İndirgeme ve Maç Dinamikleri

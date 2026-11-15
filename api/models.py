@@ -20,6 +20,14 @@ class PlayerProp(BaseModel):
     proj_fg3:     float
     proj_stl:     float
     proj_blk:     float
+    injury_status: Optional[str] = None      # e.g. Day-To-Day; None = healthy
+    sd_pts: Optional[float] = None           # residual std from 2025-26 holdout
+    sd_trb: Optional[float] = None
+    sd_ast: Optional[float] = None
+    sd_fg3: Optional[float] = None
+    sd_stl: Optional[float] = None
+    sd_blk: Optional[float] = None
+    low_confidence_stats: list[str] = []
 
 
 class InjuryEntry(BaseModel):
@@ -49,6 +57,8 @@ class GameCard(BaseModel):
     pred_total:      float
     home_win_prob:   float
     pred_game_pace:  float
+    home_injury_penalty: float = 0.0   # net-rating points removed for absences
+    away_injury_penalty: float = 0.0
 
 
 class GameDetail(GameCard):
@@ -65,14 +75,16 @@ class GamesResponse(BaseModel):
 
 
 class TeamSeasonProjection(BaseModel):
-    team_id:        int
+    team_id:        str
     team_name:      str
     team_abbr:      str
     proj_wins:      float
     proj_losses:    float
     proj_win_pct:   float
-    avg_pred_score: float
+    avg_pred_score: float          # projected net rating
     conference:     Optional[str] = None
+    playoff_prob_pct: Optional[float] = None
+    vegas_total:      Optional[float] = None
 
 
 class SeasonProjectionsResponse(BaseModel):

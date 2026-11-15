@@ -65,6 +65,8 @@ def _to_game_card(g: dict) -> GameCard:
         pred_total      = g.get("proj_total", 0.0),
         home_win_prob   = hwp,
         pred_game_pace  = g.get("pred_game_pace", 98.0),
+        home_injury_penalty = g.get("home_injury_penalty", 0.0),
+        away_injury_penalty = g.get("away_injury_penalty", 0.0),
     )
 
 
@@ -80,6 +82,10 @@ def _to_player_prop(raw: dict) -> PlayerProp:
         proj_fg3     = raw.get("proj_fg3", 0.0),
         proj_stl     = raw.get("proj_stl", 0.0),
         proj_blk     = raw.get("proj_blk", 0.0),
+        injury_status = raw.get("injury_status"),
+        sd_pts = raw.get("sd_pts"), sd_trb = raw.get("sd_trb"), sd_ast = raw.get("sd_ast"),
+        sd_fg3 = raw.get("sd_fg3"), sd_stl = raw.get("sd_stl"), sd_blk = raw.get("sd_blk"),
+        low_confidence_stats = raw.get("low_confidence_stats", []),
     )
 
 
@@ -137,10 +143,22 @@ def get_game_detail(event_id: str):
         if p.get("game_id") == event_id and p.get("team_id", "").upper() == away_abbr
     ]
 
+    report = game_row.get("injury_report", {})
+
+    def _inj(team_abbr: str) -> list[InjuryEntry]:
+        return [
+            InjuryEntry(
+                player_id=0, name=r.get("player", ""), position="",
+                status=r.get("status", ""), description=r.get("note", ""),
+                is_excluded=bool(r.get("excluded")),
+            )
+            for r in report.get(team_abbr, [])
+        ]
+
     return GameDetail(
         **card.model_dump(),
         home_player_props = home_props,
         away_player_props = away_props,
-        home_injuries     = [],
-        away_injuries     = [],
+        home_injuries     = _inj(game_row.get("home_team", "")),
+        away_injuries     = _inj(game_row.get("away_team", "")),
     )
