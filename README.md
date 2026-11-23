@@ -49,12 +49,41 @@ Prevents data leakage by leveraging SQL analytical windowing for prior performan
 
 ---
 
-## 🚀 Predictive Engines
+## 🚀 Daily Game & Player Prediction Engine (v3)
 
-1. **Top 100 Player Season Projections (`models/project_top_100_players.py`):**
-   * Multi-season weighted decay model predicting `PTS`, `REB`, `AST`, `3PM`, `TS%`, and `USG%` for regular starters and high-usage stars.
-2. **Team Win/Loss Simulator (`models/project_team_standings.py`):**
-   * Net Rating trajectory and conference standings simulation with an 82-game zero-sum league constraint (1,230 total regular season wins).
+```bash
+python -m engine.live_engine                  # today's slate (US Eastern date)
+python -m engine.live_engine --days-ahead 1   # tomorrow's slate
+python models/train.py                        # retrain + full validation report
+```
 
----
+**Data:** BigQuery `fact_player_boxscores` (5 completed seasons) + the current season from the
+ESPN API, written back to BigQuery (`espn_player_boxscores`, `espn_game_results`,
+`dim_player_id_map`, unified view `v_player_games`). No betting lines or third-party
+projections are used anywhere.
 
+**Model** (`engine/`):
+1. *Player state* (`features.py`) – for every player, per-minute production of each box stat
+   (incl. on-court plus-minus), exponentially weighted over his own games across seasons and
+   shrunk toward an "unknown player" prior; projected minutes = EWMA of minutes played.
+2. *Tonight's lineups* – ESPN roster minus Out/Doubtful players; expected minutes =
+   P(plays) × minutes-when-playing, fitted to 240 (bench absorbs any excess) →
+   projected team box score.
+3. *Team ratings* (`team_ratings.py`) – opponent-adjusted offense/defense/pace by
+   recency-weighted ridge regression; prior = last season's final rating regressed 50%.
+4. *Game model* (`game_model.py`) – ridge regressions fitted on real final scores:
+   margin and total from lineup box-score differences/sums + ratings + back-to-backs;
+   in-season scoring-level correction for totals; P(win) = Φ(margin / σ).
+5. *Player props* – gradient boosting on rates × projected minutes + team/opponent context
+   (or plain rate × minutes where boosting did not win on the validation season).
+
+**Validation** (`models/train.py`, report in `models/evaluation_report.txt`): strictly
+walk-forward (features use only earlier games), hyper-parameters chosen on 2024-25,
+final fit on 2022-25, tested on the untouched 2025-26 season and on 2026-27 to date.
+
+**Tracking:** each run upserts pre-tipoff predictions into `pred_games` /
+`pred_player_props`; views `v_game_prediction_results` and `v_player_prop_results`
+grade them against real results as games finish.
+
+> Season-long projections (`models/simulate_2026_27_season.py`, `/api/projections/season`)
+> are a separate, older pipeline and still use Vegas win totals as calibration.

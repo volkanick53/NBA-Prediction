@@ -35,7 +35,7 @@ def _load_predictions(date_str: str) -> dict:
                 return data
         raise HTTPException(
             status_code=404,
-            detail=f"{date_str} icin tahmin bulunamadi. Once 'python predict_oct20_offline.py' calistirin.",
+            detail=f"{date_str} icin tahmin bulunamadi. Once 'python -m engine.live_engine --date {date_str}' calistirin.",
         )
     return json.loads(path.read_text(encoding="utf-8"))
 

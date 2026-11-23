@@ -269,7 +269,7 @@ export default function HomePage() {
                   Bu tarih için tahmin bulunamadı
                 </div>
                 <div style={{ fontSize: 13, color: '#334155', marginTop: 8 }}>
-                  Önce <code style={{ color: '#F7A230' }}>python -m engine.predict_daily --date {date}</code> çalıştırın
+                  Önce <code style={{ color: '#F7A230' }}>python -m engine.live_engine --date {date}</code> çalıştırın
                 </div>
               </div>
             ) : (

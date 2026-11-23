@@ -1,26 +1,28 @@
 """
 engine/live_engine.py
 =====================
-Game-day prediction engine (replaces the ID-mismatched engine/predict_daily.py).
+Game-day prediction engine (model v3).
 
-    python -m engine.live_engine --date 20261021
-    python -m engine.live_engine --date 20261021 --write-bq     # also persist to BigQuery
+    python -m engine.live_engine                  # today's slate (US Eastern date)
+    python -m engine.live_engine --days-ahead 1   # tomorrow's slate
+    python -m engine.live_engine --date 20261124  # a specific date
+    python -m engine.live_engine --no-store       # JSON only, no BigQuery writes
 
-Pipeline
+Pipeline (same functions as models/train.py, so what was validated is what runs)
 --------
-1. ESPN scoreboard  -> the day's games (authoritative fixture list).
-2. ESPN rosters     -> who is on each team *today* (trades/signings handled).
-3. ESPN injuries    -> Out/Doubtful players removed from rotations (+ team-strength penalty).
-4. BigQuery history -> this season's box scores (fact_player_boxscores) and game
-                       summaries (fact_game_summaries) read *before* game day.
-5. Blend            -> pre-season prior (MARCELS / roster net rating) and in-season
-                       form via Bayesian weight  w = n / (n + K), recency-weighted
-                       (EWMA, half-life 10 games). Zero games -> pure prior.
-6. Predict          -> the same calibrated matchup logic as predict_oct20_offline.py
-                       (ratings + XGBoost blend, 240-minute rotation, props, SDs).
+1. Data       BigQuery fact_player_boxscores (5 completed seasons) + current season
+              from ESPN, pushed to BigQuery (espn_* tables, v_player_games view).
+2. Players    leakage-free shrunk per-minute rates and projected minutes for every
+              player (engine/features.py).
+3. Lineups    ESPN roster minus Out/Doubtful players on the ESPN injury report;
+              projected minutes scaled to 240 -> projected team box score.
+4. Ratings    opponent-adjusted team offense/defense/pace (engine/team_ratings.py),
+              prior = last season's final rating regressed to the mean.
+5. Game model ridge regressions fitted on real outcomes (engine/game_model.py):
+              margin, total (+ in-season scoring-level correction), win probability.
+6. Props      gradient-boosted per-stat models on rates x projected minutes + context.
 
-ESPN ids never touch our history tables: players are matched by normalised name
-to Basketball-Reference ids, teams by abbreviation (core.bbref).
+No betting lines or third-party projections are used.
 """
 
 from __future__ import annotations
@@ -31,154 +33,52 @@ import logging
 from datetime import date as date_cls, datetime, timedelta, timezone
 from pathlib import Path
 
-import db_dtypes  # noqa: F401  (BigQuery DATE -> pandas)
 import numpy as np
 import pandas as pd
-from google.cloud import bigquery
-from google.oauth2 import service_account
+from scipy.stats import norm
 
-import predict_oct20_offline as core
-from engine import espn_client as espn
+from engine import data, espn_client as espn, espn_history as hist
+from engine.features import (TEAM_FEATS, FeatureParams, game_table, latest_states, player_states,
+                             scale_minutes, team_features_from_states, team_vector)
+from engine.game_model import (PROP_FEATS, PROP_RATE_STATS, PROP_STATS, GameModel, game_dataset,
+                               game_row, prop_rows)
+from engine.team_ratings import RatingParams, fit_ratings, rating_features, season_prior, walk_ratings
 
 log = logging.getLogger("live_engine")
 
-KEY_PATH = "nba-analytics-503718-9f3bbd399bc1.json"
-PROJECT = "nba-analytics-503718"
-DATASET = f"{PROJECT}.nba_analytics"
-HISTORY_TABLE = f"{DATASET}.prediction_history"
+MODEL_VERSION = "v3"
+OUT_STATUSES = {"Out", "Doubtful", "Injured Reserve", "Suspended", "Out For Season"}
+RECENT_TEAM_GAMES = 10      # "in the rotation" = appeared in one of the team's last N games
+REGULAR_MIN = 15.0          # ... or a regular (e.g. returning from an absence)
+MIN_PROP_MINUTES = 5.0
 
-EWMA_HALFLIFE = 10
-K_TEAM = core.K_TEAM_PRIOR       # games of pseudo-evidence behind the team prior
-K_PLAYER = core.K_PLAYER_PRIOR   # ... behind the player prior
-
-# prior-dict key -> box score column
-PLAYER_FIELDS = {"mpg": "minutes", "ppg": "pts", "rpg": "trb", "apg": "ast",
-                 "spg": "stl", "bpg": "blk", "fg3m": "fg3", "usg": "usg_pct", "ts": "ts_pct"}
-
-
-# ---------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------
-def season_for(d: date_cls) -> str:
-    y = d.year if d.month >= 9 else d.year - 1
-    return f"{y}-{(y + 1) % 100:02d}"
-
-
-def ewma(values: np.ndarray, halflife: float = EWMA_HALFLIFE) -> float:
-    """Recency-weighted mean; the last element has weight 1."""
-    n = len(values)
-    w = 0.5 ** (np.arange(n)[::-1] / halflife)
-    return float((np.asarray(values, dtype=float) * w).sum() / w.sum())
+TEAM_FULL_NAMES = {
+    "ATL": "Atlanta Hawks", "BOS": "Boston Celtics", "BRK": "Brooklyn Nets",
+    "CHO": "Charlotte Hornets", "CHI": "Chicago Bulls", "CLE": "Cleveland Cavaliers",
+    "DAL": "Dallas Mavericks", "DEN": "Denver Nuggets", "DET": "Detroit Pistons",
+    "GSW": "Golden State Warriors", "HOU": "Houston Rockets", "IND": "Indiana Pacers",
+    "LAC": "LA Clippers", "LAL": "Los Angeles Lakers", "MEM": "Memphis Grizzlies",
+    "MIA": "Miami Heat", "MIL": "Milwaukee Bucks", "MIN": "Minnesota Timberwolves",
+    "NOP": "New Orleans Pelicans", "NYK": "New York Knicks", "OKC": "Oklahoma City Thunder",
+    "ORL": "Orlando Magic", "PHI": "Philadelphia 76ers", "PHO": "Phoenix Suns",
+    "POR": "Portland Trail Blazers", "SAC": "Sacramento Kings", "SAS": "San Antonio Spurs",
+    "TOR": "Toronto Raptors", "UTA": "Utah Jazz", "WAS": "Washington Wizards",
+}
+TO_ESPN = {"NYK": "NY", "SAS": "SA", "NOP": "NO", "UTA": "UTAH", "BRK": "BKN", "CHO": "CHA",
+           "GSW": "GS", "PHO": "PHX", "WAS": "WSH"}
+LOGO_TPL = "https://a.espncdn.com/i/teamlogos/nba/500/scoreboard/{abbr}.png"
 
 
-def bq_client() -> bigquery.Client:
-    creds = service_account.Credentials.from_service_account_file(KEY_PATH)
-    return bigquery.Client(credentials=creds, project=PROJECT)
+def espn_abbr(t: str) -> str:
+    return TO_ESPN.get(t, t)
 
 
-# ---------------------------------------------------------------
-# BigQuery history
-# ---------------------------------------------------------------
-def fetch_player_history(client, season: str, day: date_cls, ids: list[str]) -> dict[str, pd.DataFrame]:
-    if not ids:
-        return {}
-    sql = f"""
-        SELECT player_id, game_date, minutes, pts, trb, ast, fg3, stl, blk, usg_pct, ts_pct
-        FROM `{DATASET}.fact_player_boxscores`
-        WHERE season = @season AND game_date < @d AND player_id IN UNNEST(@ids)
-        ORDER BY player_id, game_date
-    """
-    cfg = bigquery.QueryJobConfig(query_parameters=[
-        bigquery.ScalarQueryParameter("season", "STRING", season),
-        bigquery.ScalarQueryParameter("d", "DATE", day),
-        bigquery.ArrayQueryParameter("ids", "STRING", ids),
-    ])
-    df = client.query(sql, job_config=cfg).to_dataframe()
-    for c in ["minutes", "pts", "trb", "ast", "fg3", "stl", "blk", "usg_pct", "ts_pct"]:
-        df[c] = pd.to_numeric(df[c], errors="coerce")
-    df = df[df["minutes"].fillna(0) > 0]
-    return {pid: g.reset_index(drop=True) for pid, g in df.groupby("player_id")}
+def us_today() -> date_cls:
+    """NBA slates are keyed by US Eastern date (a TR-night game belongs to the previous US day)."""
+    from zoneinfo import ZoneInfo
+    return datetime.now(ZoneInfo("America/New_York")).date()
 
 
-def fetch_team_history(client, season: str, day: date_cls) -> dict[str, pd.DataFrame]:
-    """Per team (BBRef abbr): own ORtg, DRtg (= opponent ORtg), pace, date per game."""
-    sql = f"""
-        SELECT game_date, home_team, away_team, pace, home_off_rtg, away_off_rtg
-        FROM `{DATASET}.fact_game_summaries`
-        WHERE season = @season AND game_date < @d
-        ORDER BY game_date
-    """
-    cfg = bigquery.QueryJobConfig(query_parameters=[
-        bigquery.ScalarQueryParameter("season", "STRING", season),
-        bigquery.ScalarQueryParameter("d", "DATE", day),
-    ])
-    df = client.query(sql, job_config=cfg).to_dataframe()
-    for c in ["pace", "home_off_rtg", "away_off_rtg"]:
-        df[c] = pd.to_numeric(df[c], errors="coerce")
-    rows = []
-    for r in df.itertuples():
-        rows.append((core.bbref(r.home_team), r.game_date, r.home_off_rtg, r.away_off_rtg, r.pace))
-        rows.append((core.bbref(r.away_team), r.game_date, r.away_off_rtg, r.home_off_rtg, r.pace))
-    t = pd.DataFrame(rows, columns=["team", "game_date", "ortg", "drtg", "pace"]).dropna()
-    return {k: g.sort_values("game_date").reset_index(drop=True) for k, g in t.groupby("team")}
-
-
-# ---------------------------------------------------------------
-# Prior <-> in-season blending
-# ---------------------------------------------------------------
-def blend_player(prior: dict, hist: pd.DataFrame | None) -> tuple[dict, float]:
-    if hist is None or hist.empty:
-        return dict(prior), 0.0
-    n = len(hist)
-    w = n / (n + K_PLAYER)
-    out = dict(prior)
-    for key, col in PLAYER_FIELDS.items():
-        vals = hist[col].dropna().to_numpy()
-        if len(vals):
-            out[key] = w * ewma(vals) + (1 - w) * prior[key]
-    out["games_this_season"] = n
-    return out, w
-
-
-def blend_team(prior: dict, hist: pd.DataFrame | None) -> tuple[dict, float]:
-    if hist is None or hist.empty:
-        return dict(prior), 0.0
-    n = len(hist)
-    w = n / (n + K_TEAM)
-    out = dict(prior)
-    out["ortg"] = w * ewma(hist["ortg"].to_numpy()) + (1 - w) * prior["ortg"]
-    out["drtg"] = w * ewma(hist["drtg"].to_numpy()) + (1 - w) * prior["drtg"]
-    out["pace"] = w * ewma(hist["pace"].to_numpy()) + (1 - w) * prior["pace"]
-    out["net"] = out["ortg"] - out["drtg"]
-    return out, w
-
-
-# ---------------------------------------------------------------
-# ESPN roster -> our player records
-# ---------------------------------------------------------------
-def build_name_index(player_priors: dict[str, list[dict]]) -> dict[str, list[dict]]:
-    idx: dict[str, list[dict]] = {}
-    for plist in player_priors.values():
-        for p in plist:
-            idx.setdefault(core.norm_name(p["name"]), []).append(p)
-    return idx
-
-
-def resolve_roster(espn_team_id: int, team: str, name_idx: dict) -> tuple[list[dict], list[str]]:
-    matched, unmatched = [], []
-    for a in espn.get_roster(espn_team_id):
-        cands = name_idx.get(core.norm_name(a["name"]))
-        if not cands:
-            unmatched.append(a["name"])
-            continue
-        pick = next((c for c in cands if c["team_id"] == team), cands[0])
-        matched.append({**pick, "team_id": team})
-    return matched, unmatched
-
-
-# ---------------------------------------------------------------
-# Output
-# ---------------------------------------------------------------
 def to_tr_time(iso_utc: str) -> str:
     try:
         dt = datetime.fromisoformat(iso_utc.replace("Z", "+00:00"))
@@ -187,171 +87,241 @@ def to_tr_time(iso_utc: str) -> str:
         return ""
 
 
-def write_history(output: dict) -> None:
-    """Persist predictions for later accuracy tracking (table auto-created)."""
-    client = bq_client()
-    schema = [
-        bigquery.SchemaField("prediction_date", "DATE"),
-        bigquery.SchemaField("generated_at", "TIMESTAMP"),
-        bigquery.SchemaField("game_id", "STRING"),
-        bigquery.SchemaField("home_team", "STRING"),
-        bigquery.SchemaField("away_team", "STRING"),
-        bigquery.SchemaField("pred_home_score", "FLOAT"),
-        bigquery.SchemaField("pred_away_score", "FLOAT"),
-        bigquery.SchemaField("pred_spread", "FLOAT"),
-        bigquery.SchemaField("pred_total", "FLOAT"),
-        bigquery.SchemaField("home_win_prob", "FLOAT"),
-        bigquery.SchemaField("game_json", "STRING"),
-        bigquery.SchemaField("props_json", "STRING"),
-    ]
-    try:
-        client.get_table(HISTORY_TABLE)
-    except Exception:
-        tbl = bigquery.Table(HISTORY_TABLE, schema=schema)
-        tbl.time_partitioning = bigquery.TimePartitioning(field="prediction_date")
-        client.create_table(tbl)
-        log.info("Created %s", HISTORY_TABLE)
+def rest_days(day: date_cls, teams: set[str]) -> dict[str, int]:
+    """Days since each team's previous game (schedule-based: includes games not yet final)."""
+    rest = {}
+    for back in range(1, 8):
+        for g in hist.scoreboard(day - timedelta(days=back), day):
+            for t in (hist.bbref(g["home_team_abbr"]), hist.bbref(g["away_team_abbr"])):
+                if t in teams and t not in rest:
+                    rest[t] = back
+        if len(rest) == len(teams):
+            break
+    return {t: rest.get(t, 7) for t in teams}
 
-    pdate = datetime.strptime(output["date"], "%Y%m%d").date().isoformat()
-    props_by_game: dict[str, list] = {}
-    for p in output["player_props"]:
-        props_by_game.setdefault(p["game_id"], []).append(p)
-    rows = [{
-        "prediction_date": pdate,
-        "generated_at": output["generated_at"],
-        "game_id": g["game_id"],
-        "home_team": g["home_team"], "away_team": g["away_team"],
-        "pred_home_score": g["proj_home_score"], "pred_away_score": g["proj_away_score"],
-        "pred_spread": g["proj_spread"], "pred_total": g["proj_total"],
-        "home_win_prob": g["home_win_prob"] / 100.0,
-        "game_json": json.dumps(g, ensure_ascii=False),
-        "props_json": json.dumps(props_by_game.get(g["game_id"], []), ensure_ascii=False),
-    } for g in output["games"]]
-    errs = client.insert_rows_json(HISTORY_TABLE, rows)
-    if errs:
-        raise RuntimeError(f"BigQuery insert failed: {errs}")
-    log.info("%d games written to %s", len(rows), HISTORY_TABLE)
+
+# ---------------------------------------------------------------
+# Lineup for one team
+# ---------------------------------------------------------------
+def build_lineup(team: str, espn_team_id: int, latest: pd.DataFrame, pg: pd.DataFrame,
+                 id_map: dict, name_idx: dict, injuries: dict) -> dict:
+    sg = pg[(pg["team"] == team) & (pg["season"] == data.CURRENT_SEASON)]
+    recent = (sg[["game_id", "game_date"]].drop_duplicates().sort_values("game_date")
+              ["game_id"].tail(RECENT_TEAM_GAMES))
+    appear = sg[sg["game_id"].isin(recent)].groupby("player_id").size() / max(len(recent), 1)
+    recent_players = set(appear.index)
+
+    rows, report, no_history, not_in_rotation = [], [], [], []
+    for a in espn.get_roster(espn_team_id):
+        eid = str(a["player_id"])
+        pid = id_map.get(eid) or data.map_espn(a["name"], team, name_idx) or f"espn_{eid}"
+        inj = injuries.get(eid)
+        out = bool(inj and inj["status"] in OUT_STATUSES)
+        if inj:
+            report.append({"player": a["name"], "status": inj["status"], "excluded": out,
+                           "note": (inj.get("description") or "")[:240]})
+        if pid not in latest.index:
+            no_history.append(a["name"])
+            continue
+        st = latest.loc[pid]
+        if out:
+            continue
+        if pid not in recent_players and st["proj_min"] < REGULAR_MIN:
+            not_in_rotation.append(a["name"])
+            continue
+        # P(plays): a healthy regular plays (covers returns from injury and new arrivals);
+        # anyone else = share of the team's recent games he appeared in.
+        if st["proj_min"] >= REGULAR_MIN and not inj:
+            p_play = 1.0
+        else:
+            p_play = float(appear.get(pid, 0.0)) or 1.0
+        rows.append({"player_id": pid, "espn_id": eid, "name": a["name"],
+                     "position": a.get("position", ""),
+                     "injury_status": inj["status"] if inj else None, "p_play": p_play,
+                     "pre_min": float(st["proj_min"]), "pre_games": float(st["games"]),
+                     **{f"pre_{s}": float(st[f"rate_{s}"]) for s in PROP_RATE_STATS}})
+    P = pd.DataFrame(rows)
+    if P.empty:
+        return {"players": P, "F": None, "report": report, "no_history": no_history}
+    # expected minutes = P(plays) x minutes when playing, scaled to the 240-minute team total
+    P["m"] = scale_minutes((P["p_play"] * P["pre_min"]).to_numpy())
+    F = team_vector(P["m"].to_numpy(), {s: P[f"pre_{s}"].to_numpy() for s in TEAM_FEATS})
+    return {"players": P, "F": F, "report": report, "no_history": no_history,
+            "not_in_rotation": not_in_rotation}
 
 
 # ---------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------
-def run(date_str: str, season: str | None = None, use_injuries: bool = True,
-        use_bq: bool = True, write_bq: bool = False, out_dir: Path = Path("output")) -> dict | None:
+def run(date_str: str, use_injuries: bool = True, store: bool = True,
+        out_dir: Path = Path("output")) -> dict | None:
     day = datetime.strptime(date_str, "%Y%m%d").date()
-    season = season or season_for(day)
     out_dir.mkdir(exist_ok=True)
-    log.info("=" * 65)
-    log.info("Live engine | date %s | season %s", date_str, season)
+    log.info("=" * 70)
+    log.info("Live engine %s | date %s", MODEL_VERSION, date_str)
 
-    games = espn.get_scoreboard(date_str)
-    if not games:
+    slate = espn.get_scoreboard(date_str)
+    if not slate:
         log.warning("No games on %s", date_str)
         return None
 
-    registry = core.ModelRegistry()
-    team_priors, lg_rtg, lg_pace = core.load_team_priors()
-    player_priors = core.load_player_priors()
-    name_idx = build_name_index(player_priors)
-    injuries = core.load_injuries() if use_injuries else {}
+    model = GameModel.load()
+    fp = FeatureParams(**model.meta["feature_params"])
+    rp = RatingParams(**model.meta["rating_params"])
+    prior = model.meta["prior_rates"]
 
-    sched = pd.read_csv(core.SCHEDULE_FILE)
-    rest_lookup = core.build_rest_lookup(sched)
-    cup = {(core.bbref(r.home_team), core.bbref(r.away_team), r.game_date): bool(r.is_nba_cup_group)
-           for r in sched.itertuples()}
-    iso_day = day.isoformat()
+    # 1-2. data + player states (everything strictly before `day`)
+    pg, _, id_map = data.player_games(day, push_bq=store)
+    states = player_states(pg, prior, fp)
+    latest = latest_states(states)
+    name_idx = data.build_name_index(pg[~pg["player_id"].str.startswith("espn_")])
 
-    # --- rosters (ESPN, today) ---
-    rosters: dict[str, list[dict]] = {}
-    unmatched_all: dict[str, list[str]] = {}
-    for g in games:
-        for tid, abbr in ((g["home_team_id"], g["home_team_abbr"]), (g["away_team_id"], g["away_team_abbr"])):
-            t = core.bbref(abbr)
-            if t not in rosters:
-                rosters[t], um = resolve_roster(tid, t, name_idx)
-                if um:
-                    unmatched_all[t] = um
+    # 4. ratings: walk all seasons (prior chain + current-season features for the level correction)
+    games = game_table(pg)
+    rfeat, finals = walk_ratings(games, rp)
+    cur = games[games["season"] == data.CURRENT_SEASON]
+    prev_season = max(s for s in finals if s < data.CURRENT_SEASON)
+    pri, mu0, mup0 = season_prior(finals[prev_season], rp)
+    R = fit_ratings(cur, sorted(finals[prev_season].teams), pri, mu0, mup0, pd.Timestamp(day), rp)
 
-    # --- BigQuery history ---
-    p_hist: dict[str, pd.DataFrame] = {}
-    t_hist: dict[str, pd.DataFrame] = {}
-    if use_bq:
+    # in-season scoring level: shrunk mean residual of this season's games (all before `day`)
+    level = 0.0
+    n0 = model.meta.get("total_level_n0")
+    if n0 and not cur.empty:
+        TF, _ = team_features_from_states(states[states["season"] == data.CURRENT_SEASON])
+        Dc = game_dataset(cur, rfeat, TF)
+        res = Dc["total"].to_numpy() - model.total.predict(Dc)
+        level = float(res.sum() / (len(res) + n0))
+    log.info("Season games so far: %d | total-level correction %+.2f", len(cur), level)
+
+    # 3. injuries
+    injuries: dict[str, dict] = {}
+    if use_injuries:
         try:
-            client = bq_client()
-            ids = sorted({p["player_id"] for pl in rosters.values() for p in pl})
-            p_hist = fetch_player_history(client, season, day, ids)
-            t_hist = fetch_team_history(client, season, day)
-            log.info("History: %d players, %d teams with %s games before %s",
-                     len(p_hist), len(t_hist), season, iso_day)
+            for lst in espn.get_injuries().values():
+                for i in lst:
+                    injuries[str(i["player_id"])] = i
         except Exception as exc:
-            log.warning("BigQuery unavailable (%s) - falling back to pre-season priors only.", exc)
+            log.warning("Injury report unavailable (%s) - all rostered players assumed available.", exc)
 
-    all_games, all_props = [], []
-    for g in games:
-        home, away = core.bbref(g["home_team_abbr"]), core.bbref(g["away_team_abbr"])
-        if home not in team_priors or away not in team_priors:
-            log.warning("Skipping %s @ %s (no team prior)", away, home)
+    teams_today = {hist.bbref(g[k]) for g in slate for k in ("home_team_abbr", "away_team_abbr")}
+    rest = rest_days(day, teams_today)
+
+    all_games, all_props, data_gaps = [], [], {}
+    for g in slate:
+        home, away = hist.bbref(g["home_team_abbr"]), hist.bbref(g["away_team_abbr"])
+        if home not in R.off or away not in R.off:
+            log.warning("Skipping %s @ %s (unknown team)", away, home)
             continue
+        hl = build_lineup(home, g["home_team_id"], latest, pg, id_map, name_idx, injuries)
+        al = build_lineup(away, g["away_team_id"], latest, pg, id_map, name_idx, injuries)
+        if hl["F"] is None or al["F"] is None:
+            log.warning("Skipping %s @ %s (no lineup)", away, home)
+            continue
+        for t, L in ((home, hl), (away, al)):
+            if L["no_history"]:
+                data_gaps[espn_abbr(t)] = L["no_history"]
 
-        hp, h_w = blend_team(team_priors[home], t_hist.get(home))
-        ap, a_w = blend_team(team_priors[away], t_hist.get(away))
+        rf = rating_features(R, home, away)
+        X = pd.DataFrame([game_row(hl["F"], al["F"], rf, rest[home], rest[away])])
+        pr = model.predict_games(X).iloc[0]
+        margin = float(pr["margin"])
+        total = float(pr["total"]) + level
+        hwp = float(norm.cdf(margin / model.sigma)) * 100
+        h_pts, a_pts = total / 2 + margin / 2, total / 2 - margin / 2
 
-        def players(t):
-            out = []
-            for p in rosters.get(t, []):
-                bp, _ = blend_player(p, p_hist.get(p["player_id"]))
-                out.append(bp)
-            out.sort(key=lambda x: x["mpg"], reverse=True)
-            return out
+        props = []
+        for L, team, is_home, Fo, own, oth in ((hl, home, True, al["F"], home, away),
+                                               (al, away, False, hl["F"], away, home)):
+            P = L["players"]
+            Xp = prop_rows(P, L["F"], Fo, {"off": R.off[own], "def": R.deff[own]},
+                           {"off": R.off[oth], "def": R.deff[oth]}, rf["r_pace"], is_home, rest[team])
+            preds = pd.DataFrame(index=P.index)
+            for s in PROP_STATS:
+                if model.meta["prop_method"].get(s) == "xgboost":
+                    preds[s] = np.clip(model.prop_model(s).predict(Xp[PROP_FEATS]), 0, None)
+                else:
+                    preds[s] = Xp[f"x_{s}"]
+            for rank, i in enumerate(P["m"].sort_values(ascending=False).index):
+                if P.at[i, "m"] < MIN_PROP_MINUTES:
+                    continue
+                row = {"game_id": str(g["event_id"]), "player_id": P.at[i, "player_id"],
+                       "espn_id": P.at[i, "espn_id"], "player_name": P.at[i, "name"],
+                       "team_id": espn_abbr(team), "position": P.at[i, "position"],
+                       "role": "starter" if rank < 5 else "bench",
+                       "projected_mins": round(float(P.at[i, "m"]), 1),
+                       "injury_status": P.at[i, "injury_status"]
+                       if isinstance(P.at[i, "injury_status"], str) else None}
+                for s in PROP_STATS:
+                    key = "fg3" if s == "fg3m" else s
+                    v = float(preds.at[i, s])
+                    row[f"proj_{key}"] = round(v, 1)
+                    row[f"sd_{key}"] = round(model.prop_sd.get(s, 1.0) * np.sqrt(v + 1.0), 2)
+                props.append(row)
 
-        def rest(t):
-            h = t_hist.get(t)
-            if h is not None and len(h):
-                last = pd.Timestamp(h["game_date"].iloc[-1]).date()
-                return int(np.clip((day - last).days, 1, core.REST_DAYS_CAP))
-            return rest_lookup.get((t, iso_day), core.REST_DAYS_CAP)
-
-        game, props = core.predict_matchup(
-            registry, home, away, str(g["event_id"]), iso_day, to_tr_time(g["game_date"]),
-            cup.get((home, away, iso_day), False),
-            hp, ap, players(home), players(away), rest(home), rest(away),
-            (home not in t_hist or away not in t_hist), lg_rtg, lg_pace, injuries, h_w, a_w,
-        )
+        game = {
+            "game_id": str(g["event_id"]), "game_date": date_str,
+            "match_time_tr": to_tr_time(g["game_date"]), "status": g.get("status", ""),
+            "home_team": espn_abbr(home), "away_team": espn_abbr(away),
+            "home_team_full": TEAM_FULL_NAMES.get(home, home),
+            "away_team_full": TEAM_FULL_NAMES.get(away, away),
+            "home_logo": LOGO_TPL.format(abbr=espn_abbr(home).lower()),
+            "away_logo": LOGO_TPL.format(abbr=espn_abbr(away).lower()),
+            "proj_home_score": round(h_pts, 1), "proj_away_score": round(a_pts, 1),
+            "proj_spread": round(margin, 1), "proj_total": round(total, 1),
+            "spread_sd": round(model.sigma, 1), "total_sd": round(model.total_sigma, 1),
+            "pred_game_pace": round(rf["r_pace"], 1),
+            "home_win_prob": round(hwp, 1), "away_win_prob": round(100 - hwp, 1),
+            "predicted_winner": espn_abbr(home if hwp >= 50 else away),
+            "home_rest_days": rest[home], "away_rest_days": rest[away],
+            "home_net_rating": round(R.off[home] + R.deff[home], 2),
+            "away_net_rating": round(R.off[away] + R.deff[away], 2),
+            "injury_report": {espn_abbr(home): hl["report"], espn_abbr(away): al["report"]},
+            "model_breakdown": {
+                "rating_margin": round(rf["r_margin"], 2),
+                "home_projected_box": {k: round(v, 1) for k, v in hl["F"].items()},
+                "away_projected_box": {k: round(v, 1) for k, v in al["F"].items()},
+                "home_lineup_size": len(hl["players"]), "away_lineup_size": len(al["players"]),
+                "games_played": [R.n_games.get(home, 0), R.n_games.get(away, 0)],
+                "total_level_correction": round(level, 2),
+            },
+        }
         all_games.append(game)
         all_props.extend(props)
-        log.info("  %s @ %s -> %.1f - %.1f | spread %+.1f | home %.1f%% | in-season w %.2f/%.2f",
-                 away, home, game["proj_away_score"], game["proj_home_score"],
-                 game["proj_spread"], game["home_win_prob"], a_w, h_w)
+        log.info("  %s @ %s -> %.1f - %.1f | spread %+.1f | total %.1f | home %.1f%% | rest %d/%d",
+                 away, home, a_pts, h_pts, margin, total, hwp, rest[away], rest[home])
 
     output = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "date": date_str,
-        "season": season,
-        "methodology": "ESPN roster/injuries + BigQuery in-season history, Bayesian blend with "
-                       "pre-season prior (K_team=%d, K_player=%d) -> calibrated ratings/XGBoost" % (K_TEAM, K_PLAYER),
-        "unmatched_roster_players": unmatched_all,
-        "games": all_games,
-        "player_props": all_props,
+        "date": date_str, "season": data.CURRENT_SEASON, "model_version": MODEL_VERSION,
+        "season_games_used": int(len(cur)),
+        "methodology": ("Player-lineup projected box score (5 seasons BigQuery + current ESPN) + "
+                        "opponent-adjusted team ratings -> ridge models fitted on real outcomes; "
+                        "props: gradient boosting on rates x projected minutes. No betting data."),
+        "players_without_history": data_gaps,
+        "games": all_games, "player_props": all_props,
     }
-    (out_dir / f"predictions_{date_str}.json").write_text(
-        json.dumps(output, indent=2, ensure_ascii=False), encoding="utf-8")
-    (out_dir / "predictions_latest.json").write_text(
-        json.dumps(output, indent=2, ensure_ascii=False), encoding="utf-8")
-    n_um = sum(len(v) for v in unmatched_all.values())
-    log.info("Done: %d games, %d player lines; %d roster players without prior (rookies/two-way)",
-             len(all_games), len(all_props), n_um)
-    if write_bq:
-        write_history(output)
+    for name in (f"predictions_{date_str}.json", "predictions_latest.json"):
+        (out_dir / name).write_text(json.dumps(output, indent=2, ensure_ascii=False), encoding="utf-8")
+    log.info("Done: %d games, %d player lines", len(all_games), len(all_props))
+    if store:
+        try:
+            from engine import prediction_store
+            prediction_store.save_predictions(output, MODEL_VERSION)
+        except Exception as exc:   # JSON output is already on disk
+            log.error("BigQuery store failed (%s); predictions kept in %s", exc, out_dir)
     return output
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     ap = argparse.ArgumentParser(description="NBA live prediction engine")
-    ap.add_argument("--date", default=datetime.now().strftime("%Y%m%d"), help="YYYYMMDD (ET game date)")
-    ap.add_argument("--season", default=None, help="override season label, e.g. 2025-26 (testing)")
+    ap.add_argument("--date", default=None, help="YYYYMMDD (US game date); default = today in US Eastern")
+    ap.add_argument("--days-ahead", type=int, default=0, help="offset from today, e.g. 1 = tomorrow")
     ap.add_argument("--no-injuries", action="store_true")
-    ap.add_argument("--no-bq", action="store_true", help="skip BigQuery history (pure priors)")
-    ap.add_argument("--write-bq", action="store_true", help="persist to prediction_history table")
+    ap.add_argument("--no-store", action="store_true", help="do not write to BigQuery")
     ap.add_argument("--out-dir", default="output")
     a = ap.parse_args()
-    run(a.date, a.season, not a.no_injuries, not a.no_bq, a.write_bq, Path(a.out_dir))
+    d = a.date or (us_today() + timedelta(days=a.days_ahead)).strftime("%Y%m%d")
+    run(d, not a.no_injuries, not a.no_store, Path(a.out_dir))

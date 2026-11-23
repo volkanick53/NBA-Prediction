@@ -6,9 +6,16 @@ venv/
 # Google Cloud & API Keys (KRİTİK)
 *.json
 !requirements*.json
+# trained models are versioned (no secrets inside)
+!models/*.json
+# frontend config
+!frontend/*.json
 
 # Data & Scraping Artifacts
 *.csv
+data/cache/
+data/espn_cache/
+output/
 all_boxscore_urls.json
 remaining_absences_urls.json
 missing_boxscore_urls.json

@@ -20,7 +20,6 @@ from api.models import SeasonProjectionsResponse, TeamSeasonProjection
 log = logging.getLogger(__name__)
 router = APIRouter()
 
-TEAM_PARQUET = Path("data/team_features.parquet")
 OUTPUT_DIR   = Path("output")
 TEAM_PROJ_CSV = Path("proj_team_wins_2026_27.csv")
 STANDINGS_CSV = Path("nba_2026_27_team_standings_projection.csv")

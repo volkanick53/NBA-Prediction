@@ -1,127 +1,107 @@
-========================================================================
-  NBA TAKIM MODELLERİ — XGBoost Eğitimi
-========================================================================
+====================================================================================================
+NBA prediction model - training & validation report   (2026-11-23 22:02)
+====================================================================================================
+Player-games: 136,747 | seasons: 2021-22 (26,029), 2022-23 (25,880), 2023-24 (26,383), 2024-25 (26,287), 2025-26 (26,639), 2026-27 (5,529)
+Sources: BigQuery fact_player_boxscores (completed seasons), ESPN box scores (current season).
+No betting lines or external projections are used anywhere.
 
-1. Takım feature tablosu yükleniyor: data/team_features.parquet
-   -> 12,240 satır, 27 kolon yüklendi.
+Games: 6,398 | team ratings walked day-by-day (4s)
 
-2. Pace özellikleri (6): ['roll_pace_5', 'roll_pace_10', 'rest_days', 'roll_pace_10_opp_pregame', 'rest_days_opp_pregame', 'is_home']
-   Puan özellikleri (15): ['roll_ortg_5', 'roll_ortg_10', 'roll_drtg_5', 'roll_drtg_10', 'roll_pts_5', 'roll_pts_10', 'roll_pace_5', 'roll_pace_10', 'rest_days', 'roll_ortg_10_opp_pregame', 'roll_drtg_10_opp_pregame', 'roll_pts_10_opp_pregame', 'roll_pace_10_opp_pregame', 'rest_days_opp_pregame', 'is_home']
+[1] Selection: train ['2022-23', '2023-24'] -> validate ['2024-25']
+   halflife  20 g | prior 100 min | alpha   1.0: n= 1230 acc 0.688 | logloss 0.5904 | brier 0.2029 | margin MAE 10.77 RMSE 13.84 | total MAE 14.53 (bias -2.08)
+   halflife  20 g | prior 100 min | alpha  10.0: n= 1230 acc 0.691 | logloss 0.5904 | brier 0.2028 | margin MAE 10.77 RMSE 13.84 | total MAE 14.53 (bias -2.06)
+   halflife  20 g | prior 100 min | alpha 100.0: n= 1230 acc 0.692 | logloss 0.5905 | brier 0.2028 | margin MAE 10.76 RMSE 13.83 | total MAE 14.51 (bias -1.90)
+   halflife  20 g | prior 250 min | alpha   1.0: n= 1230 acc 0.687 | logloss 0.5904 | brier 0.2028 | margin MAE 10.76 RMSE 13.84 | total MAE 14.52 (bias -1.96)
+   halflife  20 g | prior 250 min | alpha  10.0: n= 1230 acc 0.689 | logloss 0.5903 | brier 0.2028 | margin MAE 10.76 RMSE 13.83 | total MAE 14.51 (bias -1.93)
+   halflife  20 g | prior 250 min | alpha 100.0: n= 1230 acc 0.691 | logloss 0.5904 | brier 0.2028 | margin MAE 10.76 RMSE 13.83 | total MAE 14.50 (bias -1.77)
+   halflife  20 g | prior 500 min | alpha   1.0: n= 1230 acc 0.687 | logloss 0.5905 | brier 0.2029 | margin MAE 10.76 RMSE 13.84 | total MAE 14.51 (bias -1.84)
+   halflife  20 g | prior 500 min | alpha  10.0: n= 1230 acc 0.688 | logloss 0.5905 | brier 0.2028 | margin MAE 10.76 RMSE 13.84 | total MAE 14.50 (bias -1.81)
+   halflife  20 g | prior 500 min | alpha 100.0: n= 1230 acc 0.692 | logloss 0.5905 | brier 0.2028 | margin MAE 10.75 RMSE 13.83 | total MAE 14.49 (bias -1.65)
+   halflife  40 g | prior 100 min | alpha   1.0: n= 1230 acc 0.684 | logloss 0.5915 | brier 0.2033 | margin MAE 10.78 RMSE 13.86 | total MAE 14.50 (bias -1.77)
+   halflife  40 g | prior 100 min | alpha  10.0: n= 1230 acc 0.684 | logloss 0.5914 | brier 0.2033 | margin MAE 10.78 RMSE 13.86 | total MAE 14.49 (bias -1.71)
+   halflife  40 g | prior 100 min | alpha 100.0: n= 1230 acc 0.684 | logloss 0.5916 | brier 0.2034 | margin MAE 10.78 RMSE 13.86 | total MAE 14.47 (bias -1.43)
+   halflife  40 g | prior 250 min | alpha   1.0: n= 1230 acc 0.685 | logloss 0.5913 | brier 0.2033 | margin MAE 10.77 RMSE 13.86 | total MAE 14.49 (bias -1.63)
+   halflife  40 g | prior 250 min | alpha  10.0: n= 1230 acc 0.686 | logloss 0.5913 | brier 0.2033 | margin MAE 10.77 RMSE 13.86 | total MAE 14.48 (bias -1.56)
+   halflife  40 g | prior 250 min | alpha 100.0: n= 1230 acc 0.683 | logloss 0.5915 | brier 0.2033 | margin MAE 10.77 RMSE 13.86 | total MAE 14.45 (bias -1.27)
+   halflife  40 g | prior 500 min | alpha   1.0: n= 1230 acc 0.686 | logloss 0.5913 | brier 0.2033 | margin MAE 10.77 RMSE 13.86 | total MAE 14.48 (bias -1.47)
+   halflife  40 g | prior 500 min | alpha  10.0: n= 1230 acc 0.686 | logloss 0.5913 | brier 0.2033 | margin MAE 10.77 RMSE 13.86 | total MAE 14.47 (bias -1.39)
+   halflife  40 g | prior 500 min | alpha 100.0: n= 1230 acc 0.682 | logloss 0.5916 | brier 0.2033 | margin MAE 10.77 RMSE 13.86 | total MAE 14.44 (bias -1.09)
+   halflife  80 g | prior 100 min | alpha   1.0: n= 1230 acc 0.682 | logloss 0.5932 | brier 0.2041 | margin MAE 10.81 RMSE 13.90 | total MAE 14.46 (bias -1.32)
+   halflife  80 g | prior 100 min | alpha  10.0: n= 1230 acc 0.682 | logloss 0.5932 | brier 0.2041 | margin MAE 10.81 RMSE 13.90 | total MAE 14.45 (bias -1.25)
+   halflife  80 g | prior 100 min | alpha 100.0: n= 1230 acc 0.680 | logloss 0.5936 | brier 0.2042 | margin MAE 10.82 RMSE 13.90 | total MAE 14.44 (bias -0.94)
+   halflife  80 g | prior 250 min | alpha   1.0: n= 1230 acc 0.680 | logloss 0.5930 | brier 0.2040 | margin MAE 10.81 RMSE 13.90 | total MAE 14.45 (bias -1.18)
+   halflife  80 g | prior 250 min | alpha  10.0: n= 1230 acc 0.680 | logloss 0.5930 | brier 0.2040 | margin MAE 10.81 RMSE 13.90 | total MAE 14.44 (bias -1.10)
+   halflife  80 g | prior 250 min | alpha 100.0: n= 1230 acc 0.678 | logloss 0.5934 | brier 0.2041 | margin MAE 10.81 RMSE 13.90 | total MAE 14.42 (bias -0.76)
+   halflife  80 g | prior 500 min | alpha   1.0: n= 1230 acc 0.680 | logloss 0.5929 | brier 0.2040 | margin MAE 10.81 RMSE 13.90 | total MAE 14.45 (bias -1.01)
+   halflife  80 g | prior 500 min | alpha  10.0: n= 1230 acc 0.680 | logloss 0.5929 | brier 0.2040 | margin MAE 10.81 RMSE 13.90 | total MAE 14.44 (bias -0.92)
+   halflife  80 g | prior 500 min | alpha 100.0: n= 1230 acc 0.680 | logloss 0.5934 | brier 0.2041 | margin MAE 10.81 RMSE 13.91 | total MAE 14.41 (bias -0.55)
+   -> chosen: halflife 20 games, prior 250 minutes, alpha 10.0
+   total level correction n0=  inf: total MAE 14.514 (bias -1.93)
+   total level correction n0=400.0: total MAE 14.458 (bias -1.49)
+   total level correction n0=200.0: total MAE 14.451 (bias -1.43)
+   total level correction n0=100.0: total MAE 14.448 (bias -1.41)
+   total level correction n0= 50.0: total MAE 14.449 (bias -1.40)
+   -> chosen n0 = 100.0
 
-3. Time-series split uygulanıyor (son sezon = validation set)...
-   Eğitim sezonları : ['2021-22', '2022-23', '2023-24', '2024-25']
-   Validation sezonu: 2025-26
-   Train satırı: 9,780 | Val satırı: 2,460
+[2] Game model fitted on ['2022-23', '2023-24', '2024-25']: margin sigma 13.41, total sigma 18.15
+    Margin coefficients (points per unit):
+      d_pts            +0.2008
+      d_fga            -0.1401
+      d_fta            +0.1018
+      d_fg3m           -0.0232
+      d_orb            -0.1231
+      d_drb            +0.3354
+      d_ast            +0.1620
+      d_stl            +1.1344
+      d_blk            -0.0980
+      d_tov            -0.0034
+      d_pf             -0.1432
+      d_plus_minus     +0.5660
+      r_margin         +0.4413
+      b2b_diff         +2.4472
+      home edge (intercept at average features) +2.09
 
-------------------------------------------------------------
-MODEL 1A: Game Pace (toplam pozisyon / 48 dk)
-------------------------------------------------------------
+[3] TEST - never used for any choice
+   2025-26:
+     full model    n= 1230 acc 0.697 | logloss 0.5881 | brier 0.2015 | margin MAE 11.14 RMSE 14.28 | total MAE 14.89 (bias -0.01)
+     ratings only  n= 1230 acc 0.692 | logloss 0.5971 | brier 0.2049 | margin MAE 11.34 RMSE 14.54 | total MAE 15.00 (bias +0.00)
+     players only  n= 1230 acc 0.693 | logloss 0.5914 | brier 0.2029 | margin MAE 11.19 RMSE 14.30 | total MAE 15.72 (bias +0.21)
+     home always   acc 0.554  (baseline)
+     calibration (full model):
+                     n  predicted  actual
+       bin                               
+       (0.0, 0.2]   44      0.147   0.159
+       (0.2, 0.3]   97      0.251   0.175
+       (0.3, 0.4]  142      0.353   0.338
+       (0.4, 0.5]  198      0.453   0.409
+       (0.5, 0.6]  216      0.549   0.579
+       (0.6, 0.7]  199      0.648   0.688
+       (0.7, 0.8]  186      0.743   0.763
+       (0.8, 1.0]  148      0.859   0.845
+   2026-27:
+     full model    n=  248 acc 0.694 | logloss 0.5760 | brier 0.1962 | margin MAE 11.09 RMSE 14.41 | total MAE 14.99 (bias +1.96)
+     ratings only  n=  248 acc 0.657 | logloss 0.6097 | brier 0.2104 | margin MAE 11.39 RMSE 14.76 | total MAE 14.97 (bias +0.94)
+     players only  n=  248 acc 0.690 | logloss 0.5749 | brier 0.1962 | margin MAE 11.10 RMSE 14.36 | total MAE 15.86 (bias +3.66)
+     home always   acc 0.520  (baseline)
+     calibration (full model):
+                    n  predicted  actual
+       bin                              
+       (0.0, 0.2]  11      0.161   0.091
+       (0.2, 0.3]  19      0.242   0.105
+       (0.3, 0.4]  29      0.355   0.241
+       (0.4, 0.5]  40      0.453   0.450
+       (0.5, 0.6]  43      0.558   0.488
+       (0.6, 0.7]  44      0.650   0.659
+       (0.7, 0.8]  38      0.753   0.789
+       (0.8, 1.0]  24      0.852   0.875
 
-   [team_pace_model]
-   RMSE : 4.472
-   MAE  : 3.553
-   R²   : 0.2126
-   Model kaydedildi -> models/team_pace_model.json
+[4] Player props (players who played; minutes are projected, not actual)
+   minutes MAE (projection vs actual): validation 4.91
+   pts   validation MAE: xgb 4.492 vs rate*minutes 4.516 -> xgboost        | test 2025-26 MAE 4.461 (baseline 4.526, r 0.74) | test 2026-27 MAE 4.539 (baseline 4.617, r 0.73)
+   trb   validation MAE: xgb 1.883 vs rate*minutes 1.933 -> xgboost        | test 2025-26 MAE 1.853 (baseline 1.918, r 0.68) | test 2026-27 MAE 1.855 (baseline 1.927, r 0.68)
+   ast   validation MAE: xgb 1.325 vs rate*minutes 1.321 -> rate_x_minutes | test 2025-26 MAE 1.338 (baseline 1.338, r 0.70) | test 2026-27 MAE 1.334 (baseline 1.334, r 0.69)
+   fg3m  validation MAE: xgb 0.885 vs rate*minutes 0.898 -> xgboost        | test 2025-26 MAE 0.890 (baseline 0.899, r 0.57) | test 2026-27 MAE 0.901 (baseline 0.903, r 0.55)
+   stl   validation MAE: xgb 0.708 vs rate*minutes 0.699 -> rate_x_minutes | test 2025-26 MAE 0.706 (baseline 0.706, r 0.34) | test 2026-27 MAE 0.683 (baseline 0.683, r 0.36)
+   blk   validation MAE: xgb 0.519 vs rate*minutes 0.526 -> xgboost        | test 2025-26 MAE 0.518 (baseline 0.523, r 0.46) | test 2026-27 MAE 0.515 (baseline 0.516, r 0.45)
 
-------------------------------------------------------------
-MODEL 1B-HOME: Ev Sahibi Takım Puanı
-------------------------------------------------------------
-
-   [team_points_home_model]
-   RMSE : 12.859
-   MAE  : 10.320
-   R²   : 0.0155
-   Model kaydedildi -> models/team_points_home_model.json
-
-------------------------------------------------------------
-MODEL 1B-AWAY: Deplasman Takımı Puanı
-------------------------------------------------------------
-
-   [team_points_away_model]
-   RMSE : 12.415
-   MAE  : 9.799
-   R²   : 0.0602
-   Model kaydedildi -> models/team_points_away_model.json
-
-------------------------------------------------------------
-FEATURE IMPORTANCE — Pace Modeli (İlk 10)
-------------------------------------------------------------
-   roll_pace_10_opp_pregame                 0.2738
-   roll_pace_10                             0.2118
-   roll_pace_5                              0.1976
-   rest_days_opp_pregame                    0.1196
-   rest_days                                0.1101
-   is_home                                  0.0871
-
-   Meta dosyası kaydedildi -> models/team_model_meta.json
-
-========================================================================
-  NBA OYUNCU PROP MODELLERİ — XGBoost Eğitimi
-========================================================================
-
-1. Oyuncu feature tablosu yükleniyor: data/player_features.parquet
-   -> 129,966 satır, 62 kolon yüklendi.
-   -> 8+ dakika filtresi sonrası: 113,752 satır
-
-2. Kullanılan özellikler (28): ['p_roll_min_5', 'p_roll_min_10', 'p_roll_pts_5', 'p_roll_pts_10', 'p_roll_trb_5', 'p_roll_trb_10', 'p_roll_ast_5', 'p_roll_ast_10', 'p_roll_fg3_5', 'p_roll_fg3_10', 'p_roll_stl_5', 'p_roll_stl_10', 'p_roll_blk_5', 'p_roll_blk_10', 'p_roll_usg_5', 'p_roll_usg_10', 'p_roll_ts_5', 'p_roll_ts_10', 'p_pts_per_min_10', 'p_trb_per_min_10', 'p_ast_per_min_10', 'player_rest_days', 'is_home', 'roll_pace_10', 'roll_ortg_10', 'roll_drtg_10', 'roll_drtg_10_opp_pregame', 'roll_pace_10_opp_pregame']
-
-3. Time-series split (son sezon = validation)...
-   Eğitim  : ['2021-22', '2022-23', '2023-24', '2024-25']
-   Valida. : 2025-26
-   Train: 90,469 | Val: 23,283
-
-------------------------------------------------------------
-MODEL: PLAYER_PTS_MODEL (hedef: pts)
-------------------------------------------------------------
-   RMSE : 6.173
-   MAE  : 4.775
-   R²   : 0.4611
-   Kaydedildi -> models/player_pts_model.json
-   Top 5 Feature: ['p_roll_pts_10', 'p_roll_pts_5', 'p_roll_min_10', 'p_roll_usg_10', 'p_roll_min_5']
-
-------------------------------------------------------------
-MODEL: PLAYER_REB_MODEL (hedef: trb)
-------------------------------------------------------------
-   RMSE : 2.561
-   MAE  : 1.969
-   R²   : 0.3848
-   Kaydedildi -> models/player_reb_model.json
-   Top 5 Feature: ['p_roll_trb_10', 'p_roll_trb_5', 'p_trb_per_min_10', 'p_roll_min_5', 'p_roll_fg3_10']
-
-------------------------------------------------------------
-MODEL: PLAYER_AST_MODEL (hedef: ast)
-------------------------------------------------------------
-   RMSE : 1.913
-   MAE  : 1.433
-   R²   : 0.4536
-   Kaydedildi -> models/player_ast_model.json
-   Top 5 Feature: ['p_roll_ast_10', 'p_roll_ast_5', 'p_ast_per_min_10', 'p_roll_min_10', 'p_roll_min_5']
-
-------------------------------------------------------------
-MODEL: PLAYER_3PM_MODEL (hedef: fg3)
-------------------------------------------------------------
-   RMSE : 1.300
-   MAE  : 0.957
-   R²   : 0.2702
-   Kaydedildi -> models/player_3pm_model.json
-   Top 5 Feature: ['p_roll_fg3_10', 'p_roll_fg3_5', 'p_roll_ts_10', 'p_roll_pts_10', 'p_trb_per_min_10']
-
-------------------------------------------------------------
-MODEL: PLAYER_STL_MODEL (hedef: stl)
-------------------------------------------------------------
-   RMSE : 0.985
-   MAE  : 0.769
-   R²   : 0.0615
-   Kaydedildi -> models/player_stl_model.json
-   Top 5 Feature: ['p_roll_stl_10', 'p_roll_ast_10', 'p_roll_stl_5', 'p_roll_min_10', 'p_roll_min_5']
-
-------------------------------------------------------------
-MODEL: PLAYER_BLK_MODEL (hedef: blk)
-------------------------------------------------------------
-   RMSE : 0.769
-   MAE  : 0.571
-   R²   : 0.1686
-   Kaydedildi -> models/player_blk_model.json
-   Top 5 Feature: ['p_roll_blk_10', 'p_roll_blk_5', 'p_trb_per_min_10', 'p_roll_fg3_10', 'p_roll_trb_10']
-
-   Meta dosyası -> models/player_model_meta.json
+Saved models\game_model.json and props_<stat>.json (53s total)
