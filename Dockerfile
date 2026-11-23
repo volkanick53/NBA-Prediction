@@ -1,14 +1,20 @@
-FROM python:3.11-slim
+# Daily NBA prediction job (Cloud Run Job)
+#   /app/data is mounted from a Cloud Storage bucket at runtime so the ESPN cache,
+#   the BigQuery history cache and the JSON outputs survive between runs.
+#   Credentials come from the job's service account - no key file in the image.
+FROM python:3.14-slim
 
-# Set working directory inside the container
+ENV PYTHONUNBUFFERED=1 PYTHONIOENCODING=utf-8
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
+COPY requirements-job.txt .
+RUN pip install --no-cache-dir -r requirements-job.txt
 
-# Copy dependency list and install them
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY engine/ engine/
+COPY models/*.py models/
+COPY models/game_model.json models/props_*.json models/
 
-# Copy current project files into container
-COPY . .
-
-# Run the ETL script
-CMD ["python", "scrape_absences.py"]
+# default: today's slate (US Eastern date); Cloud Scheduler can override args
+ENTRYPOINT ["python", "-m", "engine.live_engine", "--out-dir", "data/output"]

@@ -1,0 +1,12 @@
+# Never ship credentials or local state in the image
+*.json
+!models/game_model.json
+!models/props_*.json
+.git
+.venv
+__pycache__
+data/
+output/
+frontend/
+*.csv
+*.parquet

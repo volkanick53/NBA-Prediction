@@ -146,6 +146,7 @@ class GameModel:
         self.sigma = d["margin_sigma"]
         self.total_sigma = d["total_sigma"]
         self.prop_sd = d.get("prop_sd", {})
+        self.prop_dist = {s: PropDistribution.from_dict(v) for s, v in d.get("prop_dist", {}).items()}
         self._props = {}
 
     @classmethod
@@ -172,6 +173,74 @@ class GameModel:
         for s in PROP_STATS:
             out[s] = np.clip(self.prop_model(s).predict(X[PROP_FEATS]), 0, None)
         return out
+
+
+# ---------------------------------------------------------------
+# Predictive distribution of a player stat (skewed, data-driven)
+# ---------------------------------------------------------------
+QLEVELS = np.linspace(0.0, 1.0, 101)
+
+
+class PropDistribution:
+    """
+    Conditional empirical distribution of  y - mu  given the model's prediction mu.
+
+    Training player-games are grouped into bins by mu (quantile bins); each bin keeps
+    the empirical quantiles of the residual y - mu. For a new prediction the two nearest
+    bins are blended. This captures the right skew of NBA box-score stats (a role
+    player can have a 25-point night, he cannot have -15) and any systematic bias of mu
+    in a given range, calibrated on real outcomes rather than an assumed shape.
+    """
+
+    def __init__(self, centers: np.ndarray, rq: np.ndarray):
+        self.centers = np.asarray(centers, float)   # (B,)
+        self.rq = np.asarray(rq, float)             # (B, 101) residual quantiles
+
+    @classmethod
+    def fit(cls, mu: np.ndarray, y: np.ndarray, n_bins: int = 30) -> "PropDistribution":
+        mu, y = np.asarray(mu, float), np.asarray(y, float)
+        edges = np.unique(np.quantile(mu, np.linspace(0, 1, n_bins + 1)))
+        idx = np.clip(np.searchsorted(edges, mu, side="right") - 1, 0, len(edges) - 2)
+        centers, rq = [], []
+        for b in range(len(edges) - 1):
+            sel = idx == b
+            if sel.sum() < 50:
+                continue
+            centers.append(mu[sel].mean())
+            rq.append(np.quantile(y[sel] - mu[sel], QLEVELS))
+        return cls(np.array(centers), np.array(rq))
+
+    def _resid_q(self, mu: np.ndarray) -> np.ndarray:
+        """(N, 101) residual quantiles, linear blend of the two nearest bins."""
+        mu = np.atleast_1d(np.asarray(mu, float))
+        c = self.centers
+        j = np.clip(np.searchsorted(c, mu) - 1, 0, len(c) - 2)
+        w = np.clip((mu - c[j]) / (c[j + 1] - c[j]), 0.0, 1.0)[:, None]
+        return (1 - w) * self.rq[j] + w * self.rq[j + 1]
+
+    def quantile(self, mu, q: float) -> np.ndarray:
+        r = self._resid_q(mu)
+        return np.maximum(np.atleast_1d(mu) + np.array([np.interp(q, QLEVELS, row) for row in r]), 0.0)
+
+    def prob_at_least(self, mu, k: float) -> np.ndarray:
+        """P(y >= k) for integer-valued stats (continuity: y >= k  <=>  y > k - 0.5)."""
+        mu = np.atleast_1d(np.asarray(mu, float))
+        r = self._resid_q(mu)
+        thr = k - 0.5 - mu
+        cdf = np.array([np.interp(t, row, QLEVELS, left=0.0, right=1.0) for t, row in zip(thr, r)])
+        return 1.0 - cdf
+
+    def to_dict(self) -> dict:
+        return {"centers": self.centers.round(4).tolist(), "rq": self.rq.round(3).tolist()}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "PropDistribution":
+        return cls(np.array(d["centers"]), np.array(d["rq"]))
+
+
+# thresholds reported per stat (and the "breakout" definition used by the live engine)
+PROP_THRESHOLDS = {"pts": [10, 15, 20, 25, 30, 40], "trb": [5, 8, 10, 15], "ast": [5, 8, 10],
+                   "fg3m": [2, 3, 4, 5], "stl": [2, 3], "blk": [2, 3]}
 
 
 # ---------------------------------------------------------------

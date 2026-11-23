@@ -38,7 +38,8 @@ from engine import data  # noqa: E402
 from engine.features import (TEAM_FEATS, FeatureParams, game_table, low_minute_prior,  # noqa: E402
                              player_states, team_features_from_states)
 from engine.game_model import (GAME_MODEL_FILE, MARGIN_FEATS, MODEL_DIR, PROP_FEATS,  # noqa: E402
-                               PROP_RATE_STATS, PROP_STATS, TOTAL_FEATS, Linear,
+                               PROP_RATE_STATS, PROP_STATS, PROP_THRESHOLDS, TOTAL_FEATS,
+                               Linear, PropDistribution,
                                game_dataset, total_level)
 from engine.team_ratings import TUNED, walk_ratings  # noqa: E402
 
@@ -223,7 +224,7 @@ def main(quick: bool) -> None:
     tr_s = P[P["season"].isin(SELECT_TRAIN)]
     va_s = P[P["season"].isin(SELECT_VAL)]
     tr_f = P[P["season"].isin(FINAL_TRAIN)]
-    prop_sd, prop_metrics, prop_method = {}, {}, {}
+    prop_sd, prop_metrics, prop_method, prop_dist, prop_calib = {}, {}, {}, {}, {}
     say(f"   minutes MAE (projection vs actual): validation {np.mean(np.abs(va_s['m'] - va_s['minutes'])):.2f}")
     for s in PROP_STATS:
         mdl = XGBRegressor(**XGB_PARAMS)
@@ -238,9 +239,23 @@ def main(quick: bool) -> None:
 
         def pred(X):
             return np.clip(final.predict(X[PROP_FEATS]), 0, None) if use_model else X[f"x_{s}"].to_numpy()
-        pred_tr = pred(tr_f)
-        c = float(np.sqrt(np.mean((tr_f[s] - pred_tr) ** 2 / (pred_tr + 1.0))))
-        prop_sd[s] = c                                   # sd ~ c * sqrt(pred + 1)
+        # predictive distribution from OUT-OF-SAMPLE predictions: each training season is
+        # predicted by a model trained on the other training seasons (in-sample residuals
+        # would be too narrow)
+        oos_mu, oos_y = [], []
+        for hold in FINAL_TRAIN:
+            fit_part = tr_f[tr_f["season"] != hold]
+            held = tr_f[tr_f["season"] == hold]
+            if use_model:
+                cv = XGBRegressor(**XGB_PARAMS)
+                cv.fit(fit_part[PROP_FEATS], fit_part[s])
+                oos_mu.append(np.clip(cv.predict(held[PROP_FEATS]), 0, None))
+            else:
+                oos_mu.append(held[f"x_{s}"].to_numpy())
+            oos_y.append(held[s].to_numpy())
+        oos_mu, oos_y = np.concatenate(oos_mu), np.concatenate(oos_y)
+        prop_dist[s] = PropDistribution.fit(oos_mu, oos_y)
+        prop_sd[s] = float(np.std(oos_y - oos_mu))
         line = (f"   {s:<5} validation MAE: xgb {v_x:.3f} vs rate*minutes {v_b:.3f} -> {prop_method[s]:<14}")
         for seasons in TESTS:
             T = P[P["season"].isin(seasons)]
@@ -252,7 +267,45 @@ def main(quick: bool) -> None:
             prop_metrics.setdefault(seasons[0], {})[s] = {"mae": float(mae), "baseline_mae": float(base),
                                                          "r": float(corr)}
             line += f" | test {seasons[0]} MAE {mae:.3f} (baseline {base:.3f}, r {corr:.2f})"
+            # distribution check: calibration of P(y >= k) and 10/90 percentile coverage
+            dist = prop_dist[s]
+            y = T[s].to_numpy()
+            for k in PROP_THRESHOLDS[s]:
+                p = np.clip(dist.prob_at_least(pt, k), 1e-4, 1 - 1e-4)
+                a = (y >= k).astype(float)
+                prop_calib.setdefault(seasons[0], []).append(
+                    {"stat": s, "k": k, "pred": float(p.mean()), "actual": float(a.mean()),
+                     "brier": float(np.mean((p - a) ** 2)),
+                     "logloss": float(-np.mean(a * np.log(p) + (1 - a) * np.log(1 - p)))})
+            cov10 = float(np.mean(y < dist.quantile(pt, 0.1)))
+            cov90 = float(np.mean(y <= dist.quantile(pt, 0.9)))
+            prop_metrics[seasons[0]][s].update({"below_p10": cov10, "at_or_below_p90": cov90})
         say(line)
+    for season, rows in prop_calib.items():
+        say(f"\n   Distribution check {season}: P(stat >= k) predicted vs actual (mean over all player-games)")
+        for r in rows:
+            say(f"     {r['stat']:<5} >= {r['k']:<3} predicted {r['pred']:.3f}  actual {r['actual']:.3f}"
+                f"  (brier {r['brier']:.4f}, logloss {r['logloss']:.4f})")
+        for s in PROP_STATS:
+            mm = prop_metrics[season][s]
+            say(f"     {s:<5} share below 10th pct {mm['below_p10']:.3f} | at/below 90th pct {mm['at_or_below_p90']:.3f}")
+    # breakout check: role players (projection < 12 pts) - how well is P(20+) calibrated?
+    for seasons in TESTS:
+        T = P[P["season"].isin(seasons)]
+        if T.empty:
+            continue
+        mdl = XGBRegressor(); mdl.load_model(MODEL_DIR / "props_pts.json")
+        mu = (np.clip(mdl.predict(T[PROP_FEATS]), 0, None) if prop_method["pts"] == "xgboost"
+              else T["x_pts"].to_numpy())
+        role = mu < 12
+        p20 = prop_dist["pts"].prob_at_least(mu[role], 20)
+        a20 = (T["pts"].to_numpy()[role] >= 20).astype(float)
+        b = pd.cut(p20, [0, .01, .03, .06, .1, .2, 1])
+        tab = pd.DataFrame({"b": b, "p": p20, "y": a20}).groupby("b", observed=True).agg(
+            n=("y", "size"), predicted=("p", "mean"), actual=("y", "mean")).round(3)
+        say(f"\n   Role-player breakouts {seasons[0]} (projection < 12 pts): P(20+) calibration")
+        for ln in tab.to_string().splitlines():
+            say("     " + ln)
 
     # ---------- save ----------
     meta = {
@@ -265,6 +318,7 @@ def main(quick: bool) -> None:
         "prior_rates": prior,
         "margin_model": lm.to_dict(), "total_model": lt.to_dict(),
         "margin_sigma": sig, "total_sigma": tsig, "prop_sd": prop_sd, "prop_method": prop_method,
+        "prop_dist": {s: d.to_dict() for s, d in prop_dist.items()},
         "total_level_n0": None if not np.isfinite(n0) else n0,
         "test_metrics": test_metrics, "prop_test_metrics": prop_metrics,
     }

@@ -1,5 +1,5 @@
 ====================================================================================================
-NBA prediction model - training & validation report   (2026-11-23 22:02)
+NBA prediction model - training & validation report   (2026-11-23 22:30)
 ====================================================================================================
 Player-games: 136,747 | seasons: 2021-22 (26,029), 2022-23 (25,880), 2023-24 (26,383), 2024-25 (26,287), 2025-26 (26,639), 2026-27 (5,529)
 Sources: BigQuery fact_player_boxscores (completed seasons), ESPN box scores (current season).
@@ -104,4 +104,80 @@ Games: 6,398 | team ratings walked day-by-day (4s)
    stl   validation MAE: xgb 0.708 vs rate*minutes 0.699 -> rate_x_minutes | test 2025-26 MAE 0.706 (baseline 0.706, r 0.34) | test 2026-27 MAE 0.683 (baseline 0.683, r 0.36)
    blk   validation MAE: xgb 0.519 vs rate*minutes 0.526 -> xgboost        | test 2025-26 MAE 0.518 (baseline 0.523, r 0.46) | test 2026-27 MAE 0.515 (baseline 0.516, r 0.45)
 
-Saved models\game_model.json and props_<stat>.json (53s total)
+   Distribution check 2025-26: P(stat >= k) predicted vs actual (mean over all player-games)
+     pts   >= 10  predicted 0.483  actual 0.481  (brier 0.1537, logloss 0.4691)
+     pts   >= 15  predicted 0.291  actual 0.288  (brier 0.1255, logloss 0.3924)
+     pts   >= 20  predicted 0.160  actual 0.157  (brier 0.0846, logloss 0.2744)
+     pts   >= 25  predicted 0.080  actual 0.078  (brier 0.0501, logloss 0.1703)
+     pts   >= 30  predicted 0.036  actual 0.035  (brier 0.0267, logloss 0.0961)
+     pts   >= 40  predicted 0.006  actual 0.005  (brier 0.0047, logloss 0.0217)
+     trb   >= 5   predicted 0.369  actual 0.368  (brier 0.1602, logloss 0.4854)
+     trb   >= 8   predicted 0.146  actual 0.142  (brier 0.0862, logloss 0.2837)
+     trb   >= 10  predicted 0.076  actual 0.071  (brier 0.0493, logloss 0.1726)
+     trb   >= 15  predicted 0.013  actual 0.010  (brier 0.0089, logloss 0.0381)
+     ast   >= 5   predicted 0.176  actual 0.176  (brier 0.0945, logloss 0.3067)
+     ast   >= 8   predicted 0.051  actual 0.052  (brier 0.0369, logloss 0.1296)
+     ast   >= 10  predicted 0.021  actual 0.022  (brier 0.0177, logloss 0.0681)
+     fg3m  >= 2   predicted 0.338  actual 0.330  (brier 0.1662, logloss 0.4933)
+     fg3m  >= 3   predicted 0.181  actual 0.175  (brier 0.1172, logloss 0.3669)
+     fg3m  >= 4   predicted 0.089  actual 0.087  (brier 0.0680, logloss 0.2323)
+     fg3m  >= 5   predicted 0.042  actual 0.039  (brier 0.0343, logloss 0.1328)
+     stl   >= 2   predicted 0.184  actual 0.196  (brier 0.1459, logloss 0.4567)
+     stl   >= 3   predicted 0.060  actual 0.063  (brier 0.0566, logloss 0.2165)
+     blk   >= 2   predicted 0.097  actual 0.094  (brier 0.0741, logloss 0.2588)
+     blk   >= 3   predicted 0.031  actual 0.029  (brier 0.0253, logloss 0.1013)
+     pts   share below 10th pct 0.088 | at/below 90th pct 0.902
+     trb   share below 10th pct 0.083 | at/below 90th pct 0.906
+     ast   share below 10th pct 0.053 | at/below 90th pct 0.897
+     fg3m  share below 10th pct 0.040 | at/below 90th pct 0.915
+     stl   share below 10th pct 0.011 | at/below 90th pct 0.910
+     blk   share below 10th pct 0.009 | at/below 90th pct 0.914
+
+   Distribution check 2026-27: P(stat >= k) predicted vs actual (mean over all player-games)
+     pts   >= 10  predicted 0.477  actual 0.450  (brier 0.1572, logloss 0.4783)
+     pts   >= 15  predicted 0.283  actual 0.265  (brier 0.1166, logloss 0.3707)
+     pts   >= 20  predicted 0.154  actual 0.149  (brier 0.0813, logloss 0.2663)
+     pts   >= 25  predicted 0.076  actual 0.069  (brier 0.0454, logloss 0.1561)
+     pts   >= 30  predicted 0.034  actual 0.030  (brier 0.0233, logloss 0.0860)
+     pts   >= 40  predicted 0.006  actual 0.006  (brier 0.0057, logloss 0.0255)
+     trb   >= 5   predicted 0.354  actual 0.353  (brier 0.1597, logloss 0.4871)
+     trb   >= 8   predicted 0.137  actual 0.134  (brier 0.0800, logloss 0.2670)
+     trb   >= 10  predicted 0.072  actual 0.069  (brier 0.0461, logloss 0.1640)
+     trb   >= 15  predicted 0.013  actual 0.009  (brier 0.0078, logloss 0.0324)
+     ast   >= 5   predicted 0.179  actual 0.166  (brier 0.0880, logloss 0.2902)
+     ast   >= 8   predicted 0.054  actual 0.050  (brier 0.0360, logloss 0.1263)
+     ast   >= 10  predicted 0.023  actual 0.020  (brier 0.0175, logloss 0.0684)
+     fg3m  >= 2   predicted 0.337  actual 0.328  (brier 0.1680, logloss 0.4974)
+     fg3m  >= 3   predicted 0.180  actual 0.172  (brier 0.1180, logloss 0.3685)
+     fg3m  >= 4   predicted 0.088  actual 0.085  (brier 0.0683, logloss 0.2351)
+     fg3m  >= 5   predicted 0.041  actual 0.036  (brier 0.0319, logloss 0.1240)
+     stl   >= 2   predicted 0.179  actual 0.179  (brier 0.1348, logloss 0.4301)
+     stl   >= 3   predicted 0.058  actual 0.060  (brier 0.0538, logloss 0.2060)
+     blk   >= 2   predicted 0.098  actual 0.093  (brier 0.0733, logloss 0.2579)
+     blk   >= 3   predicted 0.032  actual 0.029  (brier 0.0254, logloss 0.1025)
+     pts   share below 10th pct 0.111 | at/below 90th pct 0.912
+     trb   share below 10th pct 0.087 | at/below 90th pct 0.905
+     ast   share below 10th pct 0.067 | at/below 90th pct 0.902
+     fg3m  share below 10th pct 0.043 | at/below 90th pct 0.911
+     stl   share below 10th pct 0.007 | at/below 90th pct 0.913
+     blk   share below 10th pct 0.010 | at/below 90th pct 0.910
+
+   Role-player breakouts 2025-26 (projection < 12 pts): P(20+) calibration
+                      n  predicted  actual
+     b                                    
+     (0.0, 0.01]   5710      0.007   0.003
+     (0.01, 0.03]  5151      0.017   0.016
+     (0.03, 0.06]  3490      0.047   0.046
+     (0.06, 0.1]   1964      0.081   0.089
+     (0.1, 0.2]     719      0.110   0.107
+
+   Role-player breakouts 2026-27 (projection < 12 pts): P(20+) calibration
+                      n  predicted  actual
+     b                                    
+     (0.0, 0.01]   1180      0.007   0.001
+     (0.01, 0.03]  1107      0.017   0.023
+     (0.03, 0.06]   756      0.048   0.044
+     (0.06, 0.1]    416      0.081   0.062
+     (0.1, 0.2]     177      0.110   0.107
+
+Saved models\game_model.json and props_<stat>.json (74s total)

@@ -33,3 +33,8 @@ __pycache__/
 .DS_Store
 .vscode/
 .idea/
+# Local notes / tool-generated files (kept locally, not part of the project)
+project plan.md
+basketball.md
+frontend/AGENTS.md
+frontend/CLAUDE.md

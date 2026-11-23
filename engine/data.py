@@ -44,10 +44,13 @@ COLS = ["game_id", "game_date", "season", "team", "opp", "is_home", "player_id",
 
 
 def bq_client():
+    """Local: service-account key file. Cloud Run: the job's attached service account (ADC)."""
     from google.cloud import bigquery
-    from google.oauth2 import service_account
-    creds = service_account.Credentials.from_service_account_file(KEY_PATH)
-    return bigquery.Client(credentials=creds, project=PROJECT)
+    if Path(KEY_PATH).exists():
+        from google.oauth2 import service_account
+        creds = service_account.Credentials.from_service_account_file(KEY_PATH)
+        return bigquery.Client(credentials=creds, project=PROJECT)
+    return bigquery.Client(project=PROJECT)
 
 
 def season_for(d: date) -> str:

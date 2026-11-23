@@ -1,0 +1,15 @@
+# Files uploaded to Cloud Build by `gcloud run jobs deploy --source .`
+# Credentials and local state must never leave this machine this way.
+.gcloudignore
+.git
+.gitignore
+.venv/
+__pycache__/
+*.json
+!models/game_model.json
+!models/props_*.json
+data/
+output/
+frontend/
+*.csv
+*.parquet

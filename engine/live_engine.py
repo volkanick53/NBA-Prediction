@@ -40,8 +40,8 @@ from scipy.stats import norm
 from engine import data, espn_client as espn, espn_history as hist
 from engine.features import (TEAM_FEATS, FeatureParams, game_table, latest_states, player_states,
                              scale_minutes, team_features_from_states, team_vector)
-from engine.game_model import (PROP_FEATS, PROP_RATE_STATS, PROP_STATS, GameModel, game_dataset,
-                               game_row, prop_rows)
+from engine.game_model import (PROP_FEATS, PROP_RATE_STATS, PROP_STATS, PROP_THRESHOLDS, GameModel,
+                               game_dataset, game_row, prop_rows)
 from engine.team_ratings import RatingParams, fit_ratings, rating_features, season_prior, walk_ratings
 
 log = logging.getLogger("live_engine")
@@ -51,6 +51,7 @@ OUT_STATUSES = {"Out", "Doubtful", "Injured Reserve", "Suspended", "Out For Seas
 RECENT_TEAM_GAMES = 10      # "in the rotation" = appeared in one of the team's last N games
 REGULAR_MIN = 15.0          # ... or a regular (e.g. returning from an absence)
 MIN_PROP_MINUTES = 5.0
+ROLE_PTS = 12.0             # "role player" for breakout candidates = projected under 12 points
 
 TEAM_FULL_NAMES = {
     "ATL": "Atlanta Hawks", "BOS": "Boston Celtics", "BRK": "Brooklyn Nets",
@@ -156,7 +157,7 @@ def build_lineup(team: str, espn_team_id: int, latest: pd.DataFrame, pg: pd.Data
 def run(date_str: str, use_injuries: bool = True, store: bool = True,
         out_dir: Path = Path("output")) -> dict | None:
     day = datetime.strptime(date_str, "%Y%m%d").date()
-    out_dir.mkdir(exist_ok=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
     log.info("=" * 70)
     log.info("Live engine %s | date %s", MODEL_VERSION, date_str)
 
@@ -252,12 +253,28 @@ def run(date_str: str, use_injuries: bool = True, store: bool = True,
                        "projected_mins": round(float(P.at[i, "m"]), 1),
                        "injury_status": P.at[i, "injury_status"]
                        if isinstance(P.at[i, "injury_status"], str) else None}
+                probs = {}
                 for s in PROP_STATS:
                     key = "fg3" if s == "fg3m" else s
                     v = float(preds.at[i, s])
                     row[f"proj_{key}"] = round(v, 1)
-                    row[f"sd_{key}"] = round(model.prop_sd.get(s, 1.0) * np.sqrt(v + 1.0), 2)
+                    dist = model.prop_dist.get(s)
+                    if dist is None:      # model trained before distributions existed
+                        row[f"sd_{key}"] = round(model.prop_sd.get(s, 1.0) * np.sqrt(v + 1.0), 2)
+                        continue
+                    p10, p90 = float(dist.quantile(v, 0.1)[0]), float(dist.quantile(v, 0.9)[0])
+                    row[f"{key}_p10"], row[f"{key}_p90"] = round(p10, 1), round(p90, 1)
+                    row[f"sd_{key}"] = round((p90 - p10) / 2.563, 2)
+                    for k in PROP_THRESHOLDS[s]:
+                        probs[f"{key}_{k}+"] = round(float(dist.prob_at_least(v, k)[0]), 3)
+                row["probabilities"] = probs
                 props.append(row)
+
+        # role players with the highest chance of a 20-point night (calibrated on real games)
+        role = [p for p in props if p["proj_pts"] < ROLE_PTS and p.get("probabilities")]
+        breakouts = [{"player": p["player_name"], "team": p["team_id"], "proj_pts": p["proj_pts"],
+                      "pts_p90": p.get("pts_p90"), "prob_20_plus": p["probabilities"].get("pts_20+")}
+                     for p in sorted(role, key=lambda p: -p["probabilities"].get("pts_20+", 0))[:3]]
 
         game = {
             "game_id": str(g["event_id"]), "game_date": date_str,
@@ -277,6 +294,7 @@ def run(date_str: str, use_injuries: bool = True, store: bool = True,
             "home_net_rating": round(R.off[home] + R.deff[home], 2),
             "away_net_rating": round(R.off[away] + R.deff[away], 2),
             "injury_report": {espn_abbr(home): hl["report"], espn_abbr(away): al["report"]},
+            "breakout_candidates": breakouts,
             "model_breakdown": {
                 "rating_margin": round(rf["r_margin"], 2),
                 "home_projected_box": {k: round(v, 1) for k, v in hl["F"].items()},
