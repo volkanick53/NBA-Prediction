@@ -49,15 +49,36 @@ def _made_att(s) -> tuple[float, float]:
 
 
 def _summary(event_id: str) -> dict:
-    """Trimmed, cached ESPN summary. Only called for FINAL games."""
+    """Trimmed, cached ESPN summary (box score + closing market line). Only for FINAL games."""
     CACHE.mkdir(parents=True, exist_ok=True)
     f = CACHE / f"summary_{event_id}.json"
     if f.exists():
-        return json.loads(f.read_text(encoding="utf-8"))
+        cached = json.loads(f.read_text(encoding="utf-8"))
+        if "pickcenter" in cached:          # older cache files lack the market line -> refetch once
+            return cached
     s = espn._get(f"{espn.BASE}/summary", params={"event": event_id})
-    keep = {"boxscore": s.get("boxscore", {}), "header": s.get("header", {})}
+    keep = {"boxscore": s.get("boxscore", {}), "header": s.get("header", {}),
+            "pickcenter": (s.get("pickcenter") or [])[:1]}
     f.write_text(json.dumps(keep, ensure_ascii=False), encoding="utf-8")
     return keep
+
+
+def market_line(pickcenter: list | dict | None) -> dict:
+    """
+    Sportsbook line from an ESPN pickcenter entry (DraftKings).
+    market_spread: HOME handicap (e.g. -6.5 = home favoured by 6.5); market_total: over/under;
+    ml_home / ml_away: American moneyline odds.
+    """
+    pc = pickcenter[0] if isinstance(pickcenter, list) and pickcenter else (pickcenter or {})
+    h, a = pc.get("homeTeamOdds") or {}, pc.get("awayTeamOdds") or {}
+    def f(x):
+        try:
+            return float(x)
+        except (TypeError, ValueError):
+            return None
+    return {"market_spread": f(pc.get("spread")), "market_total": f(pc.get("overUnder")),
+            "ml_home": f(h.get("moneyLine")), "ml_away": f(a.get("moneyLine")),
+            "market_provider": (pc.get("provider") or {}).get("name")}
 
 
 def scoreboard(d: date, today: date) -> list[dict]:
@@ -117,7 +138,8 @@ def _parse_game(ev: dict, d: date, season: str) -> tuple[dict | None, list[dict]
             })
     game = {"game_id": ev["event_id"], "game_date": pd.Timestamp(d), "season": season,
             "home": team_of["home"], "away": team_of["away"],
-            "home_pts": score["home"], "away_pts": score["away"]}
+            "home_pts": score["home"], "away_pts": score["away"],
+            **market_line(s.get("pickcenter"))}
     return game, players
 
 

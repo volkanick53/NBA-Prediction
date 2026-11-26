@@ -44,6 +44,10 @@ GAMES_SCHEMA = [
     S("home_rest_days", "INTEGER"), S("away_rest_days", "INTEGER"),
     S("home_net_rating", "FLOAT"), S("away_net_rating", "FLOAT"), S("injuries_out", "STRING"),
     S("breakout_candidates", "STRING"),
+    # pure model before the market nudge, and the sportsbook line used (engine/market.py)
+    S("model_spread", "FLOAT"), S("model_total", "FLOAT"), S("model_home_win_prob", "FLOAT"),
+    S("market_spread", "FLOAT"), S("market_total", "FLOAT"), S("market_ml_home", "FLOAT"),
+    S("market_ml_away", "FLOAT"), S("market_home_win_prob", "FLOAT"), S("market_weight", "FLOAT"),
 ]
 PROPS_SCHEMA = [
     S("game_date", "DATE"), S("generated_at", "TIMESTAMP"), S("model_version", "STRING"),
@@ -71,8 +75,13 @@ SELECT
   IF(r.game_id IS NULL, NULL, (p.home_win_prob >= 0.5) = (r.home_pts > r.away_pts)) AS winner_correct,
   ABS(p.pred_spread - (r.home_pts - r.away_pts)) AS spread_abs_error,
   ABS(p.pred_total - (r.home_pts + r.away_pts)) AS total_abs_error,
-  POW(p.home_win_prob - IF(r.home_pts > r.away_pts, 1, 0), 2) AS brier,
-  -IF(r.home_pts > r.away_pts, LN(p.home_win_prob), LN(1 - p.home_win_prob)) AS log_loss,
+  IF(r.game_id IS NULL, NULL, POW(p.home_win_prob - IF(r.home_pts > r.away_pts, 1, 0), 2)) AS brier,
+  IF(r.game_id IS NULL, NULL,
+     -IF(r.home_pts > r.away_pts, LN(p.home_win_prob), LN(1 - p.home_win_prob))) AS log_loss,
+  -- the pure model and the market, graded on the same games
+  p.model_spread, p.market_spread, p.market_weight,
+  ABS(p.model_spread - (r.home_pts - r.away_pts)) AS model_spread_abs_error,
+  ABS(-p.market_spread - (r.home_pts - r.away_pts)) AS market_spread_abs_error,
   p.generated_at
 FROM `{T_GAMES}` p
 LEFT JOIN `{T_RESULTS}` r ON r.game_id = p.game_id
@@ -152,6 +161,14 @@ def save_predictions(output: dict, model_version: str) -> dict:
         "injuries_out": "; ".join(f"{t}: {r['player']}" for t, rep in g.get("injury_report", {}).items()
                                   for r in rep if r.get("excluded")),
         "breakout_candidates": json.dumps(g.get("breakout_candidates", []), ensure_ascii=False),
+        "model_spread": g.get("model_spread"), "model_total": g.get("model_total"),
+        "model_home_win_prob": (g["model_home_win_prob"] / 100.0
+                                if g.get("model_home_win_prob") is not None else None),
+        "market_spread": g.get("market_spread"), "market_total": g.get("market_total"),
+        "market_ml_home": g.get("market_ml_home"), "market_ml_away": g.get("market_ml_away"),
+        "market_home_win_prob": (g["market_home_win_prob"] / 100.0
+                                 if g.get("market_home_win_prob") is not None else None),
+        "market_weight": g.get("market_weight"),
     } for g in games])
     pdf = pd.DataFrame([{
         "game_date": gdate, "generated_at": gen, "model_version": model_version,

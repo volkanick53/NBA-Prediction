@@ -41,6 +41,7 @@ from engine.game_model import (GAME_MODEL_FILE, MARGIN_FEATS, MODEL_DIR, PROP_FE
                                PROP_RATE_STATS, PROP_STATS, PROP_THRESHOLDS, TOTAL_FEATS,
                                Linear, PropDistribution,
                                game_dataset, total_level)
+from engine.market import MARKET_WEIGHT  # noqa: E402
 from engine.team_ratings import TUNED, walk_ratings  # noqa: E402
 
 SELECT_TRAIN = ["2022-23", "2023-24"]
@@ -141,14 +142,14 @@ def main(quick: bool) -> None:
     t0 = time.time()
     from zoneinfo import ZoneInfo
     today = datetime.now(ZoneInfo("America/New_York")).date()
-    pg, _, _ = data.player_games(today, push_bq=False)
+    pg, G_cur, _ = data.player_games(today, push_bq=False)
     say("=" * 100)
     say(f"NBA prediction model - training & validation report   ({datetime.now():%Y-%m-%d %H:%M})")
     say("=" * 100)
     say(f"Player-games: {len(pg):,} | seasons: "
         + ", ".join(f"{s} ({n:,})" for s, n in pg.groupby('season').size().items()))
     say("Sources: BigQuery fact_player_boxscores (completed seasons), ESPN box scores (current season).")
-    say("No betting lines or external projections are used anywhere.\n")
+    say("The model uses no betting data; section [5] evaluates blending it with the sportsbook line.\n")
 
     prior = low_minute_prior(pg[pg["season"] <= "2024-25"])
     games = game_table(pg)
@@ -307,6 +308,24 @@ def main(quick: bool) -> None:
         for ln in tab.to_string().splitlines():
             say("     " + ln)
 
+    # ---------- market blend (current season, model out-of-sample) ----------
+    blend_metrics = {}
+    cur_mask = D["season"].eq(data.CURRENT_SEASON).to_numpy()
+    if cur_mask.any() and "market_spread" in G_cur:
+        M = D[cur_mask].copy()
+        M["m_model"] = lm.predict(M)
+        M["t_model"] = lt.predict(M) + total_level(D, lt, n0)[cur_mask]
+        M = M.merge(G_cur[["game_id", "market_spread", "market_total"]], on="game_id").dropna(
+            subset=["market_spread", "market_total"])
+        say(f"\n[5] Blending with the sportsbook closing line, {data.CURRENT_SEASON} ({len(M)} games)")
+        for w in (0.0, 0.15, 0.25, 0.35, 0.5, 1.0):
+            mm = (1 - w) * M["m_model"] - w * M["market_spread"]
+            tt = (1 - w) * M["t_model"] + w * M["market_total"]
+            r = game_metrics(M, mm.to_numpy(), tt.to_numpy(), sig)
+            blend_metrics[str(w)] = r
+            tag = {0.0: "model only", 1.0: "market only", MARKET_WEIGHT: "<- live setting"}.get(w, "")
+            say(f"   w={w:<4} {fmt(r)}  {tag}")
+
     # ---------- save ----------
     meta = {
         "version": "v3-player-lineup+ratings",
@@ -321,6 +340,7 @@ def main(quick: bool) -> None:
         "prop_dist": {s: d.to_dict() for s, d in prop_dist.items()},
         "total_level_n0": None if not np.isfinite(n0) else n0,
         "test_metrics": test_metrics, "prop_test_metrics": prop_metrics,
+        "market_blend_metrics": blend_metrics,
     }
     GAME_MODEL_FILE.write_text(json.dumps(meta, indent=2))
     say(f"\nSaved {GAME_MODEL_FILE} and props_<stat>.json ({time.time() - t0:.0f}s total)")

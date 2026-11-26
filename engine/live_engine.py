@@ -22,7 +22,9 @@ Pipeline (same functions as models/train.py, so what was validated is what runs)
               margin, total (+ in-season scoring-level correction), win probability.
 6. Props      gradient-boosted per-stat models on rates x projected minutes + context.
 
-No betting lines or third-party projections are used.
+7. Market      the pre-game sportsbook line (ESPN/DraftKings) nudges the final margin
+              and total with a small fixed weight (engine/market.py, default 0.25);
+              the pure model outputs are kept in model_* fields.
 """
 
 from __future__ import annotations
@@ -37,7 +39,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import norm
 
-from engine import data, espn_client as espn, espn_history as hist
+from engine import data, espn_client as espn, espn_history as hist, market
 from engine.features import (TEAM_FEATS, FeatureParams, game_table, latest_states, player_states,
                              scale_minutes, team_features_from_states, team_vector)
 from engine.game_model import (PROP_FEATS, PROP_RATE_STATS, PROP_STATS, PROP_THRESHOLDS, GameModel,
@@ -154,8 +156,19 @@ def build_lineup(team: str, espn_team_id: int, latest: pd.DataFrame, pg: pd.Data
 # ---------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------
+def pregame_line(event_id: str) -> dict:
+    """Current sportsbook line for an upcoming game (not cached - it moves until tip-off)."""
+    try:
+        s = espn._get(f"{espn.BASE}/summary", params={"event": event_id})
+        return hist.market_line(s.get("pickcenter"))
+    except Exception as exc:
+        log.warning("No market line for %s (%s) - model only.", event_id, exc)
+        return {}
+
+
 def run(date_str: str, use_injuries: bool = True, store: bool = True,
-        out_dir: Path = Path("output")) -> dict | None:
+        out_dir: Path = Path("output"), use_market: bool = True,
+        market_weight: float = market.MARKET_WEIGHT) -> dict | None:
     day = datetime.strptime(date_str, "%Y%m%d").date()
     out_dir.mkdir(parents=True, exist_ok=True)
     log.info("=" * 70)
@@ -163,7 +176,9 @@ def run(date_str: str, use_injuries: bool = True, store: bool = True,
 
     slate = espn.get_scoreboard(date_str)
     if not slate:
-        log.warning("No games on %s", date_str)
+        log.warning("No games on %s - refreshing season results only.", date_str)
+        if store:
+            data.player_games(day, push_bq=True)     # keeps the grading views up to date
         return None
 
     model = GameModel.load()
@@ -226,8 +241,13 @@ def run(date_str: str, use_injuries: bool = True, store: bool = True,
         rf = rating_features(R, home, away)
         X = pd.DataFrame([game_row(hl["F"], al["F"], rf, rest[home], rest[away])])
         pr = model.predict_games(X).iloc[0]
-        margin = float(pr["margin"])
-        total = float(pr["total"]) + level
+        model_margin = float(pr["margin"])
+        model_total = float(pr["total"]) + level
+        # sportsbook line (pre-game), used with a small fixed weight - see engine/market.py
+        mkt = pregame_line(str(g["event_id"])) if use_market else {}
+        mkt_margin = -mkt["market_spread"] if mkt.get("market_spread") is not None else None
+        margin = market.blend(model_margin, mkt_margin, market_weight)
+        total = market.blend(model_total, mkt.get("market_total"), market_weight)
         hwp = float(norm.cdf(margin / model.sigma)) * 100
         h_pts, a_pts = total / 2 + margin / 2, total / 2 - margin / 2
 
@@ -291,6 +311,15 @@ def run(date_str: str, use_injuries: bool = True, store: bool = True,
             "home_win_prob": round(hwp, 1), "away_win_prob": round(100 - hwp, 1),
             "predicted_winner": espn_abbr(home if hwp >= 50 else away),
             "home_rest_days": rest[home], "away_rest_days": rest[away],
+            # pure model (before the market nudge) and the market line itself
+            "model_spread": round(model_margin, 1), "model_total": round(model_total, 1),
+            "model_home_win_prob": round(float(norm.cdf(model_margin / model.sigma)) * 100, 1),
+            "market_spread": mkt.get("market_spread"), "market_total": mkt.get("market_total"),
+            "market_ml_home": mkt.get("ml_home"), "market_ml_away": mkt.get("ml_away"),
+            "market_home_win_prob": (round(100 * market.no_vig_home_prob(mkt.get("ml_home"), mkt.get("ml_away")), 1)
+                                     if mkt.get("ml_home") is not None and mkt.get("ml_away") is not None else None),
+            "market_provider": mkt.get("market_provider"),
+            "market_weight": market_weight if mkt_margin is not None else 0.0,
             "home_net_rating": round(R.off[home] + R.deff[home], 2),
             "away_net_rating": round(R.off[away] + R.deff[away], 2),
             "injury_report": {espn_abbr(home): hl["report"], espn_abbr(away): al["report"]},
@@ -306,8 +335,9 @@ def run(date_str: str, use_injuries: bool = True, store: bool = True,
         }
         all_games.append(game)
         all_props.extend(props)
-        log.info("  %s @ %s -> %.1f - %.1f | spread %+.1f | total %.1f | home %.1f%% | rest %d/%d",
-                 away, home, a_pts, h_pts, margin, total, hwp, rest[away], rest[home])
+        log.info("  %s @ %s -> %.1f - %.1f | spread %+.1f (model %+.1f, market %s) | total %.1f | home %.1f%%",
+                 away, home, a_pts, h_pts, margin, model_margin,
+                 None if mkt_margin is None else f"{mkt_margin:+.1f}", total, hwp)
 
     output = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -315,7 +345,8 @@ def run(date_str: str, use_injuries: bool = True, store: bool = True,
         "season_games_used": int(len(cur)),
         "methodology": ("Player-lineup projected box score (5 seasons BigQuery + current ESPN) + "
                         "opponent-adjusted team ratings -> ridge models fitted on real outcomes; "
-                        "props: gradient boosting on rates x projected minutes. No betting data."),
+                        "props: gradient boosting on rates x projected minutes. Final margin/total nudged "
+                        f"toward the sportsbook line (weight {market_weight}); pure model in model_* fields."),
         "players_without_history": data_gaps,
         "games": all_games, "player_props": all_props,
     }
@@ -340,6 +371,8 @@ if __name__ == "__main__":
     ap.add_argument("--no-injuries", action="store_true")
     ap.add_argument("--no-store", action="store_true", help="do not write to BigQuery")
     ap.add_argument("--out-dir", default="output")
+    ap.add_argument("--no-market", action="store_true", help="pure model, ignore sportsbook lines")
+    ap.add_argument("--market-weight", type=float, default=market.MARKET_WEIGHT)
     a = ap.parse_args()
     d = a.date or (us_today() + timedelta(days=a.days_ahead)).strftime("%Y%m%d")
-    run(d, not a.no_injuries, not a.no_store, Path(a.out_dir))
+    run(d, not a.no_injuries, not a.no_store, Path(a.out_dir), not a.no_market, a.market_weight)

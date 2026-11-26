@@ -1,11 +1,11 @@
 ====================================================================================================
-NBA prediction model - training & validation report   (2026-11-23 22:30)
+NBA prediction model - training & validation report   (2026-11-26 20:59)
 ====================================================================================================
-Player-games: 136,747 | seasons: 2021-22 (26,029), 2022-23 (25,880), 2023-24 (26,383), 2024-25 (26,287), 2025-26 (26,639), 2026-27 (5,529)
+Player-games: 137,233 | seasons: 2021-22 (26,029), 2022-23 (25,880), 2023-24 (26,383), 2024-25 (26,287), 2025-26 (26,639), 2026-27 (6,015)
 Sources: BigQuery fact_player_boxscores (completed seasons), ESPN box scores (current season).
-No betting lines or external projections are used anywhere.
+The model uses no betting data; section [5] evaluates blending it with the sportsbook line.
 
-Games: 6,398 | team ratings walked day-by-day (4s)
+Games: 6,420 | team ratings walked day-by-day (4s)
 
 [1] Selection: train ['2022-23', '2023-24'] -> validate ['2024-25']
    halflife  20 g | prior 100 min | alpha   1.0: n= 1230 acc 0.688 | logloss 0.5904 | brier 0.2029 | margin MAE 10.77 RMSE 13.84 | total MAE 14.53 (bias -2.08)
@@ -79,29 +79,29 @@ Games: 6,398 | team ratings walked day-by-day (4s)
        (0.7, 0.8]  186      0.743   0.763
        (0.8, 1.0]  148      0.859   0.845
    2026-27:
-     full model    n=  248 acc 0.694 | logloss 0.5760 | brier 0.1962 | margin MAE 11.09 RMSE 14.41 | total MAE 14.99 (bias +1.96)
-     ratings only  n=  248 acc 0.657 | logloss 0.6097 | brier 0.2104 | margin MAE 11.39 RMSE 14.76 | total MAE 14.97 (bias +0.94)
-     players only  n=  248 acc 0.690 | logloss 0.5749 | brier 0.1962 | margin MAE 11.10 RMSE 14.36 | total MAE 15.86 (bias +3.66)
-     home always   acc 0.520  (baseline)
+     full model    n=  270 acc 0.685 | logloss 0.5815 | brier 0.1988 | margin MAE 11.00 RMSE 14.25 | total MAE 14.94 (bias +1.85)
+     ratings only  n=  270 acc 0.656 | logloss 0.6087 | brier 0.2101 | margin MAE 11.17 RMSE 14.49 | total MAE 14.92 (bias +0.90)
+     players only  n=  270 acc 0.681 | logloss 0.5834 | brier 0.2000 | margin MAE 11.06 RMSE 14.24 | total MAE 15.68 (bias +3.58)
+     home always   acc 0.519  (baseline)
      calibration (full model):
                     n  predicted  actual
        bin                              
        (0.0, 0.2]  11      0.161   0.091
-       (0.2, 0.3]  19      0.242   0.105
-       (0.3, 0.4]  29      0.355   0.241
-       (0.4, 0.5]  40      0.453   0.450
-       (0.5, 0.6]  43      0.558   0.488
-       (0.6, 0.7]  44      0.650   0.659
-       (0.7, 0.8]  38      0.753   0.789
-       (0.8, 1.0]  24      0.852   0.875
+       (0.2, 0.3]  22      0.243   0.136
+       (0.3, 0.4]  31      0.355   0.258
+       (0.4, 0.5]  43      0.453   0.442
+       (0.5, 0.6]  49      0.556   0.469
+       (0.6, 0.7]  45      0.651   0.667
+       (0.7, 0.8]  43      0.752   0.767
+       (0.8, 1.0]  26      0.852   0.885
 
 [4] Player props (players who played; minutes are projected, not actual)
    minutes MAE (projection vs actual): validation 4.91
-   pts   validation MAE: xgb 4.492 vs rate*minutes 4.516 -> xgboost        | test 2025-26 MAE 4.461 (baseline 4.526, r 0.74) | test 2026-27 MAE 4.539 (baseline 4.617, r 0.73)
-   trb   validation MAE: xgb 1.883 vs rate*minutes 1.933 -> xgboost        | test 2025-26 MAE 1.853 (baseline 1.918, r 0.68) | test 2026-27 MAE 1.855 (baseline 1.927, r 0.68)
-   ast   validation MAE: xgb 1.325 vs rate*minutes 1.321 -> rate_x_minutes | test 2025-26 MAE 1.338 (baseline 1.338, r 0.70) | test 2026-27 MAE 1.334 (baseline 1.334, r 0.69)
+   pts   validation MAE: xgb 4.492 vs rate*minutes 4.516 -> xgboost        | test 2025-26 MAE 4.461 (baseline 4.526, r 0.74) | test 2026-27 MAE 4.521 (baseline 4.593, r 0.73)
+   trb   validation MAE: xgb 1.883 vs rate*minutes 1.933 -> xgboost        | test 2025-26 MAE 1.853 (baseline 1.918, r 0.68) | test 2026-27 MAE 1.848 (baseline 1.918, r 0.68)
+   ast   validation MAE: xgb 1.325 vs rate*minutes 1.321 -> rate_x_minutes | test 2025-26 MAE 1.338 (baseline 1.338, r 0.70) | test 2026-27 MAE 1.329 (baseline 1.329, r 0.70)
    fg3m  validation MAE: xgb 0.885 vs rate*minutes 0.898 -> xgboost        | test 2025-26 MAE 0.890 (baseline 0.899, r 0.57) | test 2026-27 MAE 0.901 (baseline 0.903, r 0.55)
-   stl   validation MAE: xgb 0.708 vs rate*minutes 0.699 -> rate_x_minutes | test 2025-26 MAE 0.706 (baseline 0.706, r 0.34) | test 2026-27 MAE 0.683 (baseline 0.683, r 0.36)
+   stl   validation MAE: xgb 0.708 vs rate*minutes 0.699 -> rate_x_minutes | test 2025-26 MAE 0.706 (baseline 0.706, r 0.34) | test 2026-27 MAE 0.681 (baseline 0.681, r 0.36)
    blk   validation MAE: xgb 0.519 vs rate*minutes 0.526 -> xgboost        | test 2025-26 MAE 0.518 (baseline 0.523, r 0.46) | test 2026-27 MAE 0.515 (baseline 0.516, r 0.45)
 
    Distribution check 2025-26: P(stat >= k) predicted vs actual (mean over all player-games)
@@ -134,33 +134,33 @@ Games: 6,398 | team ratings walked day-by-day (4s)
      blk   share below 10th pct 0.009 | at/below 90th pct 0.914
 
    Distribution check 2026-27: P(stat >= k) predicted vs actual (mean over all player-games)
-     pts   >= 10  predicted 0.477  actual 0.450  (brier 0.1572, logloss 0.4783)
-     pts   >= 15  predicted 0.283  actual 0.265  (brier 0.1166, logloss 0.3707)
-     pts   >= 20  predicted 0.154  actual 0.149  (brier 0.0813, logloss 0.2663)
-     pts   >= 25  predicted 0.076  actual 0.069  (brier 0.0454, logloss 0.1561)
-     pts   >= 30  predicted 0.034  actual 0.030  (brier 0.0233, logloss 0.0860)
-     pts   >= 40  predicted 0.006  actual 0.006  (brier 0.0057, logloss 0.0255)
-     trb   >= 5   predicted 0.354  actual 0.353  (brier 0.1597, logloss 0.4871)
-     trb   >= 8   predicted 0.137  actual 0.134  (brier 0.0800, logloss 0.2670)
-     trb   >= 10  predicted 0.072  actual 0.069  (brier 0.0461, logloss 0.1640)
-     trb   >= 15  predicted 0.013  actual 0.009  (brier 0.0078, logloss 0.0324)
-     ast   >= 5   predicted 0.179  actual 0.166  (brier 0.0880, logloss 0.2902)
-     ast   >= 8   predicted 0.054  actual 0.050  (brier 0.0360, logloss 0.1263)
-     ast   >= 10  predicted 0.023  actual 0.020  (brier 0.0175, logloss 0.0684)
-     fg3m  >= 2   predicted 0.337  actual 0.328  (brier 0.1680, logloss 0.4974)
-     fg3m  >= 3   predicted 0.180  actual 0.172  (brier 0.1180, logloss 0.3685)
-     fg3m  >= 4   predicted 0.088  actual 0.085  (brier 0.0683, logloss 0.2351)
-     fg3m  >= 5   predicted 0.041  actual 0.036  (brier 0.0319, logloss 0.1240)
-     stl   >= 2   predicted 0.179  actual 0.179  (brier 0.1348, logloss 0.4301)
-     stl   >= 3   predicted 0.058  actual 0.060  (brier 0.0538, logloss 0.2060)
-     blk   >= 2   predicted 0.098  actual 0.093  (brier 0.0733, logloss 0.2579)
-     blk   >= 3   predicted 0.032  actual 0.029  (brier 0.0254, logloss 0.1025)
-     pts   share below 10th pct 0.111 | at/below 90th pct 0.912
-     trb   share below 10th pct 0.087 | at/below 90th pct 0.905
-     ast   share below 10th pct 0.067 | at/below 90th pct 0.902
-     fg3m  share below 10th pct 0.043 | at/below 90th pct 0.911
-     stl   share below 10th pct 0.007 | at/below 90th pct 0.913
-     blk   share below 10th pct 0.010 | at/below 90th pct 0.910
+     pts   >= 10  predicted 0.477  actual 0.449  (brier 0.1556, logloss 0.4738)
+     pts   >= 15  predicted 0.283  actual 0.266  (brier 0.1165, logloss 0.3706)
+     pts   >= 20  predicted 0.153  actual 0.149  (brier 0.0811, logloss 0.2659)
+     pts   >= 25  predicted 0.076  actual 0.069  (brier 0.0455, logloss 0.1564)
+     pts   >= 30  predicted 0.034  actual 0.030  (brier 0.0233, logloss 0.0856)
+     pts   >= 40  predicted 0.006  actual 0.006  (brier 0.0056, logloss 0.0248)
+     trb   >= 5   predicted 0.353  actual 0.352  (brier 0.1591, logloss 0.4851)
+     trb   >= 8   predicted 0.137  actual 0.134  (brier 0.0800, logloss 0.2669)
+     trb   >= 10  predicted 0.072  actual 0.070  (brier 0.0472, logloss 0.1674)
+     trb   >= 15  predicted 0.012  actual 0.009  (brier 0.0078, logloss 0.0322)
+     ast   >= 5   predicted 0.178  actual 0.167  (brier 0.0875, logloss 0.2880)
+     ast   >= 8   predicted 0.054  actual 0.050  (brier 0.0362, logloss 0.1265)
+     ast   >= 10  predicted 0.023  actual 0.020  (brier 0.0176, logloss 0.0682)
+     fg3m  >= 2   predicted 0.338  actual 0.326  (brier 0.1677, logloss 0.4960)
+     fg3m  >= 3   predicted 0.181  actual 0.172  (brier 0.1182, logloss 0.3690)
+     fg3m  >= 4   predicted 0.088  actual 0.086  (brier 0.0688, logloss 0.2364)
+     fg3m  >= 5   predicted 0.041  actual 0.036  (brier 0.0316, logloss 0.1236)
+     stl   >= 2   predicted 0.179  actual 0.178  (brier 0.1341, logloss 0.4281)
+     stl   >= 3   predicted 0.058  actual 0.059  (brier 0.0527, logloss 0.2029)
+     blk   >= 2   predicted 0.098  actual 0.093  (brier 0.0731, logloss 0.2567)
+     blk   >= 3   predicted 0.032  actual 0.028  (brier 0.0252, logloss 0.1018)
+     pts   share below 10th pct 0.109 | at/below 90th pct 0.912
+     trb   share below 10th pct 0.086 | at/below 90th pct 0.905
+     ast   share below 10th pct 0.066 | at/below 90th pct 0.903
+     fg3m  share below 10th pct 0.044 | at/below 90th pct 0.912
+     stl   share below 10th pct 0.007 | at/below 90th pct 0.914
+     blk   share below 10th pct 0.009 | at/below 90th pct 0.912
 
    Role-player breakouts 2025-26 (projection < 12 pts): P(20+) calibration
                       n  predicted  actual
@@ -174,10 +174,18 @@ Games: 6,398 | team ratings walked day-by-day (4s)
    Role-player breakouts 2026-27 (projection < 12 pts): P(20+) calibration
                       n  predicted  actual
      b                                    
-     (0.0, 0.01]   1180      0.007   0.001
-     (0.01, 0.03]  1107      0.017   0.023
-     (0.03, 0.06]   756      0.048   0.044
-     (0.06, 0.1]    416      0.081   0.062
-     (0.1, 0.2]     177      0.110   0.107
+     (0.0, 0.01]   1286      0.007   0.001
+     (0.01, 0.03]  1204      0.017   0.024
+     (0.03, 0.06]   830      0.048   0.045
+     (0.06, 0.1]    445      0.081   0.063
+     (0.1, 0.2]     191      0.110   0.099
 
-Saved models\game_model.json and props_<stat>.json (74s total)
+[5] Blending with the sportsbook closing line, 2026-27 (270 games)
+   w=0.0  n=  270 acc 0.685 | logloss 0.5815 | brier 0.1988 | margin MAE 11.00 RMSE 14.25 | total MAE 14.94 (bias +1.85)  model only
+   w=0.15 n=  270 acc 0.685 | logloss 0.5798 | brier 0.1982 | margin MAE 10.95 RMSE 14.18 | total MAE 14.83 (bias +1.71)  
+   w=0.25 n=  270 acc 0.685 | logloss 0.5789 | brier 0.1978 | margin MAE 10.93 RMSE 14.14 | total MAE 14.76 (bias +1.62)  <- live setting
+   w=0.35 n=  270 acc 0.685 | logloss 0.5782 | brier 0.1975 | margin MAE 10.90 RMSE 14.11 | total MAE 14.70 (bias +1.53)  
+   w=0.5  n=  270 acc 0.689 | logloss 0.5774 | brier 0.1972 | margin MAE 10.87 RMSE 14.06 | total MAE 14.61 (bias +1.40)  
+   w=1.0  n=  270 acc 0.693 | logloss 0.5777 | brier 0.1975 | margin MAE 10.83 RMSE 13.96 | total MAE 14.40 (bias +0.94)  market only
+
+Saved models\game_model.json and props_<stat>.json (75s total)

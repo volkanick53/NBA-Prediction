@@ -5,7 +5,9 @@ warehouse of five NBA seasons, a daily ingestion pipeline for the live season, a
 player-based prediction model validated walk-forward on real outcomes, and a scheduled
 serverless job that writes every prediction back to BigQuery for continuous grading.
 
-No betting lines or third-party projections are used anywhere in the model.
+The model itself is built only from box-score data; as a final, optional step its margin
+and total are nudged toward the pre-game sportsbook line with a small fixed weight (25 %),
+and the pure-model numbers are stored alongside for comparison.
 
 ---
 
@@ -64,6 +66,13 @@ and rating context (plain rate × minutes where boosting did not win on validati
 Each prop comes with a **predictive distribution** learned from out-of-sample residuals:
 10th/90th percentiles and threshold probabilities (e.g. P(20+ points)), so role-player
 "breakout" nights are priced realistically instead of assuming the stars always score most.
+
+**6 · Market blend** ([engine/market.py](engine/market.py)) – final margin/total =
+75 % model + 25 % pre-game sportsbook line (ESPN / DraftKings). On the 2026-27 season
+(model out-of-sample) every metric improves with the market weight: margin MAE
+11.00 → 10.93, log-loss 0.5815 → 0.5789; the market alone scores 10.83 / 0.5777.
+The weight is deliberately limited so the model's own view stays visible
+(`model_spread`, `model_total`, `model_home_win_prob` columns).
 
 ---
 
